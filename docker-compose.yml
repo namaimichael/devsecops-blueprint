@@ -1,0 +1,9 @@
+version: "3.9"
+services:
+  mock-app:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile
+    ports:
+      - "8000:8000"
+    container_name: mock-app
