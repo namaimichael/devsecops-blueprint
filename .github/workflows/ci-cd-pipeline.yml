@@ -56,6 +56,6 @@ jobs:
 
     - name: 📦 Tag and push Docker image to DockerHub
       run: |
-        IMAGE=your-dockerhub-username/mock-app
+        IMAGE=namaimichael/mock-app
         docker tag mock-app:latest $IMAGE:latest
         docker push $IMAGE:latest
