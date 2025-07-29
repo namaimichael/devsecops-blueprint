@@ -144,10 +144,15 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Wait for image to be available
+        run: |
+          echo "Waiting for image to be available in registry..."
+          sleep 10
+
       - name: Run Trivy container scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
           format: 'sarif'
           output: 'trivy-image-results.sarif'
 
