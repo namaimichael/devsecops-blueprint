@@ -37,3 +37,5 @@ Provisions the GCS bucket to store Terraform remote state.
   backend "gcs" {
     bucket = "<STATE_BUCKET_NAME>"
   }
+
+  
