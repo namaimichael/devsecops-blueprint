@@ -1,2 +1,12 @@
-fastapi==0.110.0
-uvicorn[standard]==0.29.0
+fastapi>=0.104.0
+uvicorn>=0.24.0
+
+# Testing dependencies - compatible versions
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-asyncio>=0.21.0
+httpx>=0.25.0
+black>=23.0.0
+flake8>=6.0.0
+safety>=2.0.0
+bandit>=1.7.0
