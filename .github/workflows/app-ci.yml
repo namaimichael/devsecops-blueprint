@@ -62,6 +62,12 @@ jobs:
         run: |
           cd mock-app
           pip install -r requirements.txt
+          pip install autoflake
+
+      - name: Auto-remove unused imports
+        run: |
+          cd mock-app
+          autoflake --remove-all-unused-imports --ignore-init-module-imports --recursive --in-place .
 
       - name: Code formatting check
         run: |
@@ -91,10 +97,10 @@ jobs:
       - name: Upload coverage reports
         uses: codecov/codecov-action@v5
         with:
-          file: ./mock-app/coverage.xml
+          files: ./mock-app/coverage.xml
           flags: unittests
           name: codecov-umbrella
-          token: ${{ secrets.CODECOV_TOKEN }}  # Add this line if token is required
+          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
           slug: namaimichael/devsecops-blueprint
 
@@ -142,7 +148,7 @@ jobs:
           context: .
           file: ./infra/docker/Dockerfile
           push: true
-          platforms: linux/amd64,linux/arm64  # Add this line
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
