@@ -6,12 +6,11 @@ FastAPI application with simplified observability
 - Request tracking and error monitoring
 """
 
-import logging
 import time
 import random
 import uuid
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, Response
