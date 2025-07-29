@@ -89,11 +89,14 @@ jobs:
           pytest --cov=. --cov-report=xml --cov-report=term
 
       - name: Upload coverage reports
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v5
         with:
           file: ./mock-app/coverage.xml
           flags: unittests
           name: codecov-umbrella
+          token: ${{ secrets.CODECOV_TOKEN }}  # Add this line if token is required
+          fail_ci_if_error: false
+          slug: namaimichael/devsecops-blueprint
 
   # Container Build & Security
   build-and-scan:
