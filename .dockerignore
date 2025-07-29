@@ -1,6 +1,63 @@
+# Documentation and metadata
+.git
+.gitignore
+README.md
+docs/
+*.md
+
+# Infrastructure as Code (shouldn't be in app containers)
+bootstrap-backend/
+gke-infra/
+infra/terraform/
+**/.terraform/
+*.tfstate*
+*.tfvars
+*.tf
+
+# Kubernetes manifests (deployed separately)
+manifests/
+
+# Security tools (not needed in runtime containers)
+security/
+*.trivyignore
+
+# Development tools
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Logs and temporary files
+*.log
+logs/
+tmp/
+temp/
+
+# Build artifacts
+target/
+build/
+dist/
+
+# Dependencies (will be installed in container)
+node_modules/
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-mock-app/.venv/
-mock-app/__pycache__/
+venv/
+.env
+
+# Scripts (use COPY for specific scripts only)
+scripts/
+
+# Observability configs (mount as configmaps)
+observability/
+
+# CI/CD files
+.github/
+.gitlab-ci.yml
+Jenkinsfile
+
+# Large files
+*.zip
+*.tar.gz
+*.pdf
+docs/*.png

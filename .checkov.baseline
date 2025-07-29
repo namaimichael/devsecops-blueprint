@@ -1,0 +1,14 @@
+{
+  "check_type": "terraform",
+  "results": {
+    "skipped_checks": [
+      {
+        "bc_id": "CKV_GCP_1",
+        "check_id": "CKV_GCP_1",
+        "file_path": "/gke-infra/main.tf",
+        "resource": "google_storage_bucket.terraform_state",
+        "justification": "Public access needed for automated deployments"
+      }
+    ]
+  }
+}

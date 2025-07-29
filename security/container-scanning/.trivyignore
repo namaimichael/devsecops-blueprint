@@ -1,0 +1,8 @@
+# Container-specific scanning exceptions
+# These apply only to container vulnerability scans
+
+# Base image CVEs that are mitigated by runtime security
+# CVE-YYYY-XXXX (Mitigated by runtime security controls)
+
+# Scanner false positives
+# CVE-YYYY-XXXX (False positive - library not actually vulnerable in our context)

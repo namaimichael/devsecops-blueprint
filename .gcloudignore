@@ -1,0 +1,55 @@
+# Version control
+.git/
+.gitignore
+
+# Documentation
+README.md
+docs/
+*.md
+
+# Development files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Terraform state (use remote backend)
+**/.terraform/
+*.tfstate*
+tfplan*
+
+# Local development configs
+.env
+.env.local
+venv/
+node_modules/
+
+# Security tools output
+security/container-scanning/
+security/dependency-scanning/
+trivy-report.*
+dependency-check-report.*
+.scannerwork/
+
+# Logs and temporary files
+*.log
+logs/
+tmp/
+temp/
+
+# Test files
+*_test.py
+*_test.go
+test_*
+tests/
+
+# CI/CD configurations
+.github/
+.gitlab-ci.yml
+Jenkinsfile
+
+# Large files and media
+*.zip
+*.tar.gz
+docs/*.png
+observability/

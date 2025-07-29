@@ -1,0 +1,36 @@
+# Git and version control
+.git/
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Local Terraform runtime
+.terraform/
+terraform.tfstate*
+tfplan*
+
+# Kubernetes manifests (deployed separately)
+manifests/
+
+# Example and test files
+examples/
+tests/
+*_test.tf
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Other project directories
+../docs/
+../scripts/
+../security/
+../mock-app/

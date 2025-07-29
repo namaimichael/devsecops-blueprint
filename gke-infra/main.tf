@@ -87,13 +87,13 @@ resource "kubernetes_manifest" "argocd_root_app" {
 resource "helm_release" "argocd_image_updater" {
   name             = "argocd-image-updater"
   repository       = "https://argoproj.github.io/argo-helm"
-  chart            = "argocd-image-updater"  
+  chart            = "argocd-image-updater"
   namespace        = "argocd"
   create_namespace = false
   version          = "0.12.3"
 
   # no chart values needed for default behavior
-  depends_on       = [helm_release.argocd]
+  depends_on = [helm_release.argocd]
 }
 
 // ────────────────────────────────────────────────────────────────────────────

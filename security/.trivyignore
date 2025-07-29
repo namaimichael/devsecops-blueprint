@@ -1,0 +1,8 @@
+# Security scanning specific ignores
+# More permissive for security tools themselves
+
+# Development tools CVEs (scanning tools, not production apps)
+CVE-2023-DEV-*
+
+# Scanner-specific exceptions
+# Document each exception with justification

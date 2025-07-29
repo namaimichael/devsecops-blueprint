@@ -1,0 +1,10 @@
+# Trivy ignore file - Global exceptions
+# Format: CVE-ID (justification)
+
+# Example: Development-only vulnerabilities
+# CVE-2023-XXXX (Development dependency, not in production)
+
+# OS-level CVEs that don't affect containerized applications
+# Add specific CVEs here with justification
+
+# Note: Keep this file minimal - most ignores should be in specific directories

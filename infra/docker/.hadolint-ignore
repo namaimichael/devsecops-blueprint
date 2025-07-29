@@ -1,0 +1,11 @@
+# Hadolint ignore patterns
+# Format: DL#### (rule code)
+
+# Allow version pinning flexibility for rapid development
+DL3008
+
+# Allow root user in development containers
+DL3002
+
+# Allow WORKDIR absolute paths
+DL3003

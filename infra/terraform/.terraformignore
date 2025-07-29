@@ -1,0 +1,24 @@
+# Standard Terraform ignores
+.git/
+.gitignore
+README.md
+*.md
+.vscode/
+.idea/
+*.swp
+.DS_Store
+.terraform/
+terraform.tfstate*
+tfplan*
+examples/
+tests/
+*_test.tf
+.github/
+.gitlab-ci.yml
+
+# Project-specific
+../../docs/
+../../scripts/
+../../security/
+../../mock-app/
+../../observability/

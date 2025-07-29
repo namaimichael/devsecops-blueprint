@@ -1,10 +1,10 @@
 # Defines the Google Cloud provider, aliased for billing-related resources
 provider "google" {
-  alias   = "billing"
-  project = var.project_id
-  region  = var.region
-  billing_project = var.project_id 
-  
+  alias           = "billing"
+  project         = var.project_id
+  region          = var.region
+  billing_project = var.project_id
+
   # Set quota project for billing API calls
   user_project_override = true
 }
@@ -14,7 +14,7 @@ resource "google_project_service" "billing_budget_api" {
   provider = google.billing
   project  = var.project_id
   service  = "billingbudgets.googleapis.com"
-  
+
   disable_dependent_services = true
   disable_on_destroy         = false
 }
@@ -25,7 +25,7 @@ resource "google_pubsub_topic" "billing_alerts" {
   provider = google.billing
   project  = var.project_id
   name     = "billing-alerts"
-  
+
   depends_on = [google_project_service.billing_budget_api]
 }
 
@@ -54,11 +54,11 @@ resource "google_billing_budget" "free_trial_limit" {
 
   all_updates_rule {
     # Reference the topic created above to ensure correct dependency order
-    pubsub_topic                      = google_pubsub_topic.billing_alerts.id
-    schema_version                    = "1.0"
+    pubsub_topic                     = google_pubsub_topic.billing_alerts.id
+    schema_version                   = "1.0"
     monitoring_notification_channels = []
   }
-  
+
   depends_on = [
     google_project_service.billing_budget_api,
     google_pubsub_topic.billing_alerts
