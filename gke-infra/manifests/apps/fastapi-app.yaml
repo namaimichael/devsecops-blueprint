@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fastapi-service
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"                             # run after root app
+    argocd-image-updater.argoproj.io/image-list: |
+      mock-app=namaimichael/mock-app
+    argocd-image-updater.argoproj.io/fastapi.update-strategy: semver
+    argocd-image-updater.argoproj.io/fastapi.allow-tags: '^v[0-9]+\.[0-9]+\.[0-9]+$'
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/namaimichael/devsecops-blueprint.git
+    path: manifests/k8s
+    targetRevision: main
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+    syncOptions:
+      - Validate=true
