@@ -1,5 +1,4 @@
-// ────────────────────────────────────────────────────────────────────────────
-// GKE Cluster
+// GKE Cluster - Enhanced for Production (Fixed Network Policy)
 resource "google_container_cluster" "gke_cluster_salus" {
   name                     = "devsecops-gke-salus"
   location                 = var.region
@@ -11,35 +10,164 @@ resource "google_container_cluster" "gke_cluster_salus" {
   network    = var.network
   subnetwork = var.subnetwork
 
+  # Enhanced cluster features for production
+  workload_identity_config {
+    workload_pool = "${var.project_id}.svc.id.goog"
+  }
+
+  addons_config {
+    gce_persistent_disk_csi_driver_config {
+      enabled = true
+    }
+    gcp_filestore_csi_driver_config {
+      enabled = true
+    }
+    # Enable network policy addon
+    network_policy_config {
+      disabled = false
+    }
+  }
+
+  # Enable network policy for security - Fixed configuration
+  network_policy {
+    enabled  = true
+    provider = "CALICO"  # Explicitly specify Calico as the provider
+  }
+
+  # Cluster autoscaling
+  cluster_autoscaling {
+    enabled = true
+    resource_limits {
+      resource_type = "cpu"
+      minimum       = 1
+      maximum       = 100
+    }
+    resource_limits {
+      resource_type = "memory"
+      minimum       = 2
+      maximum       = 200
+    }
+  }
+
   lifecycle {
     ignore_changes = [initial_node_count]
   }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// GKE Node Pool: primary (stateless, preemptible)
+// Production Node Pool: For observability and applications - FIXED
 resource "google_container_node_pool" "primary_nodes" {
   name     = "primary-node-pool"
   cluster  = google_container_cluster.gke_cluster_salus.name
   location = var.region
 
+  # Enhanced autoscaling for production workloads
   autoscaling {
-    min_node_count = 1
-    max_node_count = 5
+    min_node_count  = 2  # Always have 2 nodes minimum
+    max_node_count  = 10 # Allow scaling up to 10 nodes
+    location_policy = "BALANCED"
   }
 
   node_config {
-    machine_type = var.machine_type
-    disk_size_gb = 20
-    preemptible  = true
-    oauth_scopes = ["https://www.googleapis.com/auth/cloud-platform"]
+    # Production-grade machine type with sufficient resources
+    machine_type = "e2-standard-4"  # 4 vCPUs, 16GB RAM
+    disk_size_gb = 50               # Increased disk for observability data
+    disk_type    = "pd-ssd"         # SSD for better performance
+    
+    # FIXED: Use only spot instances, not preemptible
+    spot = true  # Use spot instances for cost savings
+
+    oauth_scopes = [
+      "https://www.googleapis.com/auth/cloud-platform"
+    ]
 
     metadata = {
       disable-legacy-endpoints = "true"
     }
 
     labels = {
-      environment = "dev"
+      environment = "production-ready"
+      node-type   = "observability-capable"
+    }
+
+    # Enhanced security
+    shielded_instance_config {
+      enable_secure_boot          = true
+      enable_integrity_monitoring = true
+    }
+
+    # Workload Identity
+    workload_metadata_config {
+      mode = "GKE_METADATA"
+    }
+
+    # Resource reservations for system processes
+    linux_node_config {
+      sysctls = {
+        "net.core.rmem_max" = "134217728"
+        "net.core.wmem_max" = "134217728"
+      }
+    }
+  }
+
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
+
+  upgrade_settings {
+    strategy = "SURGE"
+    max_surge = 1
+    max_unavailable = 0
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Optional: Dedicated System Node Pool (for critical system components) 
+resource "google_container_node_pool" "system_nodes" {
+  name     = "system-node-pool"
+  cluster  = google_container_cluster.gke_cluster_salus.name
+  location = var.region
+
+  # System pool - always available, no spot instances
+  autoscaling {
+    min_node_count = 1
+    max_node_count = 3
+  }
+
+  node_config {
+    machine_type = "e2-medium"  # 1 vCPU, 4GB RAM - sufficient for system workloads
+    disk_size_gb = 30
+    disk_type    = "pd-standard"
+    
+
+    oauth_scopes = [
+      "https://www.googleapis.com/auth/cloud-platform"
+    ]
+
+    metadata = {
+      disable-legacy-endpoints = "true"
+    }
+
+    labels = {
+      environment = "production-ready"
+      node-type   = "system"
+    }
+
+    # Taint for system workloads only
+    taint {
+      key    = "node-type"
+      value  = "system"
+      effect = "NO_SCHEDULE"
+    }
+
+    shielded_instance_config {
+      enable_secure_boot          = true
+      enable_integrity_monitoring = true
+    }
+
+    workload_metadata_config {
+      mode = "GKE_METADATA"
     }
   }
 
@@ -49,7 +177,8 @@ resource "google_container_node_pool" "primary_nodes" {
   }
 }
 
-// Install Argo CD via Helm
+// ────────────────────────────────────────────────────────────────────────────
+// Install Argo CD via Helm - Enhanced for Production
 resource "helm_release" "argocd" {
   name             = "argocd"
   repository       = "https://argoproj.github.io/argo-helm"
@@ -58,20 +187,76 @@ resource "helm_release" "argocd" {
   create_namespace = true
   version          = "8.2.2"
 
-  set = [
-    {
-      name  = "server.service.type"
-      value = "LoadBalancer"
-    },
-    {
-      name  = "controller.replicaCount"
-      value = "1"
-    },
-    {
-      name  = "configs.params.server\\.insecure"
-      value = "true"
-    },
+  # Enhanced values for production
+  values = [
+    yamlencode({
+      server = {
+        service = {
+          type = "LoadBalancer"
+        }
+        # Resource limits for production
+        resources = {
+          requests = {
+            cpu    = "100m"
+            memory = "128Mi"
+          }
+          limits = {
+            cpu    = "200m"
+            memory = "256Mi"
+          }
+        }
+        # High availability
+        replicas = 2
+        config = {
+          "server.insecure" = true
+        }
+      }
+      
+      controller = {
+        replicas = 1
+        resources = {
+          requests = {
+            cpu    = "250m"
+            memory = "512Mi"
+          }
+          limits = {
+            cpu    = "500m"
+            memory = "1Gi"
+          }
+        }
+      }
+
+      repoServer = {
+        replicas = 2
+        resources = {
+          requests = {
+            cpu    = "100m"
+            memory = "128Mi"
+          }
+          limits = {
+            cpu    = "200m"
+            memory = "256Mi"
+          }
+        }
+      }
+
+      applicationSet = {
+        enabled = true
+        resources = {
+          requests = {
+            cpu    = "50m"
+            memory = "64Mi"
+          }
+          limits = {
+            cpu    = "100m"
+            memory = "128Mi"
+          }
+        }
+      }
+    })
   ]
+
+  depends_on = [google_container_node_pool.primary_nodes]
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -83,7 +268,7 @@ resource "kubernetes_manifest" "argocd_root_app" {
   manifest = yamldecode(file("${path.module}/manifests/bootstrap/argocd-root-app.yaml"))
 }
 
-// Argo CD Image Updater
+// Argo CD Image Updater - Enhanced
 resource "helm_release" "argocd_image_updater" {
   name             = "argocd-image-updater"
   repository       = "https://argoproj.github.io/argo-helm"
@@ -92,7 +277,21 @@ resource "helm_release" "argocd_image_updater" {
   create_namespace = false
   version          = "0.12.3"
 
-  # no chart values needed for default behavior
+  values = [
+    yamlencode({
+      resources = {
+        requests = {
+          cpu    = "50m"
+          memory = "64Mi"
+        }
+        limits = {
+          cpu    = "100m"
+          memory = "128Mi"
+        }
+      }
+    })
+  ]
+
   depends_on = [helm_release.argocd]
 }
 

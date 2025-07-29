@@ -1,3 +1,4 @@
+# Enhanced variables for production-ready infrastructure
 variable "project_id" {
   description = "The GCP project ID"
   type        = string
@@ -6,17 +7,19 @@ variable "project_id" {
 variable "region" {
   description = "The GCP region to deploy resources in"
   type        = string
+  default     = "us-west1"
 }
 
 variable "zones" {
   description = "A list of GCP zones for node locations"
   type        = list(string)
+  default     = ["us-west1-a", "us-west1-c"]
 }
 
 variable "machine_type" {
-  description = "The machine type for GKE nodes"
+  description = "The machine type for GKE nodes (enhanced for production)"
   type        = string
-  default     = "e2-small"
+  default     = "e2-standard-4"  # Upgraded from e2-small to 4 vCPUs, 16GB RAM
 }
 
 variable "network" {
@@ -31,8 +34,16 @@ variable "subnetwork" {
   default     = "default"
 }
 
+# Standardized cluster name variable (renamed from cluster_name_salus)
+variable "cluster_name" {
+  description = "Name for the GKE cluster"
+  type        = string
+  default     = "devsecops-gke-salus"
+}
+
+# Preserved for backward compatibility (if needed elsewhere)
 variable "cluster_name_salus" {
-  description = "Name for the salus GKE cluster"
+  description = "Name for the salus GKE cluster (deprecated - use cluster_name)"
   type        = string
   default     = "devsecops-gke-salus"
 }
@@ -43,7 +54,51 @@ variable "billing_account_id" {
 }
 
 variable "node_count" {
-  description = "Number of nodes for the Salus cluster"
+  description = "Initial number of nodes for the cluster"
   type        = number
-  default     = 1
+  default     = 2  # Increased from 1 to 2 for production readiness
+}
+
+variable "environment" {
+  description = "Environment name"
+  type        = string
+  default     = "dev"
+}
+
+# Observability configuration
+variable "enable_monitoring" {
+  description = "Enable monitoring stack"
+  type        = bool
+  default     = true
+}
+
+variable "enable_logging" {
+  description = "Enable logging stack"
+  type        = bool
+  default     = true
+}
+
+variable "monitoring_retention_days" {
+  description = "Days to retain monitoring data"
+  type        = number
+  default     = 15
+}
+
+# Security configuration
+variable "enable_workload_identity" {
+  description = "Enable Workload Identity"
+  type        = bool
+  default     = true
+}
+
+variable "enable_network_policy" {
+  description = "Enable Network Policy"
+  type        = bool
+  default     = true
+}
+
+variable "enable_pod_security_standards" {
+  description = "Enable Pod Security Standards"
+  type        = bool
+  default     = true
 }
