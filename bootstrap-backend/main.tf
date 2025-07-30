@@ -8,6 +8,11 @@ terraform {
   }
 }
 
+provider "google" {
+  project = var.project_id
+  region  = var.region
+}
+
 locals {
   # Generate unique bucket name based on project, environment, and deployment context
   bucket_name = "${var.project_id}-tfstate-${var.environment}-${var.deployment_context}"
@@ -19,20 +24,6 @@ locals {
     environment   = var.environment
     context       = var.deployment_context
     created_by    = var.created_by
-  }
-}
-
-# Data source to check if bucket exists
-data "google_storage_bucket" "existing" {
-  name  = local.bucket_name
-  count = var.import_if_exists ? 1 : 0
-  
-  # Continue if bucket doesn't exist
-  lifecycle {
-    postcondition {
-      condition = can(self.name)
-      error_message = "Bucket ${local.bucket_name} not found for import"
-    }
   }
 }
 
@@ -70,9 +61,9 @@ resource "google_storage_bucket" "tf_state" {
 
   labels = local.common_labels
 
-  # Prevent accidental deletion
+  # Static lifecycle block - cannot use variables
   lifecycle {
-    prevent_destroy = var.environment == "prod" ? true : false
+    prevent_destroy = false  # Set to true manually for production buckets
   }
 }
 
