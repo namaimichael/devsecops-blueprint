@@ -9,10 +9,10 @@ resource "google_monitoring_alert_policy" "state_bucket_unauthorized_access" {
     display_name = "Unauthorized state bucket access detected"
 
     condition_threshold {
-      filter         = "resource.type=\"gcs_bucket\" AND resource.labels.bucket_name=\"${google_storage_bucket.tf_state.name}\""
-      comparison     = "COMPARISON_GT"
+      filter          = "resource.type=\"gcs_bucket\" AND resource.labels.bucket_name=\"${google_storage_bucket.tf_state.name}\""
+      comparison      = "COMPARISON_GT"
       threshold_value = 0
-      duration       = "300s"
+      duration        = "300s"
 
       aggregations {
         alignment_period   = "300s"

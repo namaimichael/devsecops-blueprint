@@ -92,3 +92,15 @@ variable "import_if_exists" {
   type        = bool
   default     = false
 }
+
+variable "enable_monitoring" {
+  description = "Enable monitoring and alerting for state bucket"
+  type        = bool
+  default     = true
+}
+
+variable "notification_channels" {
+  description = "List of notification channel IDs for alerts"
+  type        = list(string)
+  default     = []
+}

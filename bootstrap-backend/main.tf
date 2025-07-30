@@ -16,22 +16,22 @@ provider "google" {
 locals {
   # Generate unique bucket name based on project, environment, and deployment context
   bucket_name = "${var.project_id}-tfstate-${var.environment}-${var.deployment_context}"
-  
+
   # Labels for resource management
   common_labels = {
-    managed_by    = "terraform"
-    project       = "devsecops-blueprint"
-    environment   = var.environment
-    context       = var.deployment_context
-    created_by    = var.created_by
+    managed_by  = "terraform"
+    project     = "devsecops-blueprint"
+    environment = var.environment
+    context     = var.deployment_context
+    created_by  = var.created_by
   }
 }
 
 resource "google_storage_bucket" "tf_state" {
   name                        = local.bucket_name
   location                    = var.region
-  storage_class              = var.storage_class
-  force_destroy              = var.environment == "dev" ? var.allow_force_destroy : false
+  storage_class               = var.storage_class
+  force_destroy               = var.environment == "dev" ? var.allow_force_destroy : false
   uniform_bucket_level_access = true
 
   versioning {
@@ -63,7 +63,7 @@ resource "google_storage_bucket" "tf_state" {
 
   # Static lifecycle block - cannot use variables
   lifecycle {
-    prevent_destroy = false  # Set to true manually for production buckets
+    prevent_destroy = false # Set to true manually for production buckets
   }
 }
 
