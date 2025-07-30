@@ -19,7 +19,7 @@ variable "zones" {
 variable "machine_type" {
   description = "The machine type for GKE nodes (enhanced for production)"
   type        = string
-  default     = "e2-standard-4"  # Upgraded from e2-small to 4 vCPUs, 16GB RAM
+  default     = "e2-standard-4" # Upgraded from e2-small to 4 vCPUs, 16GB RAM
 }
 
 variable "network" {
@@ -56,7 +56,7 @@ variable "billing_account_id" {
 variable "node_count" {
   description = "Initial number of nodes for the cluster"
   type        = number
-  default     = 2  # Increased from 1 to 2 for production readiness
+  default     = 2 # Increased from 1 to 2 for production readiness
 }
 
 variable "environment" {

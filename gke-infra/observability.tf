@@ -64,8 +64,8 @@ resource "helm_release" "kube_prometheus_stack" {
           serviceMonitorSelectorNilUsesHelmValues = false
           podMonitorSelectorNilUsesHelmValues     = false
           ruleSelectorNilUsesHelmValues           = false
-          replicas = 1
-          shards   = 1
+          replicas                                = 1
+          shards                                  = 1
           securityContext = {
             runAsNonRoot = true
             runAsUser    = 65534
@@ -78,9 +78,9 @@ resource "helm_release" "kube_prometheus_stack" {
       }
 
       grafana = {
-        enabled = true
+        enabled       = true
         adminPassword = "devsecops-demo-${random_password.grafana_password.result}"
-        
+
         resources = {
           requests = {
             memory = "256Mi"
@@ -305,7 +305,7 @@ resource "helm_release" "loki" {
   values = [
     yamlencode({
       deploymentMode = "SingleBinary"
-      
+
       loki = {
         auth_enabled = false
         commonConfig = {
@@ -332,7 +332,7 @@ resource "helm_release" "loki" {
           retention_period = "${var.monitoring_retention_days}d"
         }
       }
-      
+
       singleBinary = {
         replicas = 1
         resources = {
@@ -356,15 +356,15 @@ resource "helm_release" "loki" {
           fsGroup      = 10001
         }
       }
-      
+
       monitoring = {
         serviceMonitor = {
           enabled = true
         }
       }
-      
+
       gateway = {
-        enabled = true
+        enabled  = true
         replicas = 1
         resources = {
           requests = {

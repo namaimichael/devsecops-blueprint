@@ -1,6 +1,3 @@
-release_channel {
-  channel = "REGULAR"
-}
 
 // GKE Cluster - Enhanced for Production with Security Best Practices
 resource "google_container_cluster" "gke_cluster_salus" {
@@ -51,14 +48,14 @@ resource "google_container_cluster" "gke_cluster_salus" {
 
   master_authorized_networks_config {
     cidr_blocks {
-      cidr_block   = "69.166.236.89/32"  // Replace with your specific allowed IP range
+      cidr_block   = "69.166.236.89/32" // Replace with your specific allowed IP range
       display_name = "My Public IP"
     }
   }
 
-  network_config {
-    enable_intra_node_visibility = true
-  }
+  # network_config {
+  #   enable_intra_node_visibility = true
+  # }
 
   ip_allocation_policy {
     cluster_secondary_range_name  = "pods"
@@ -100,12 +97,12 @@ resource "google_container_node_pool" "primary_nodes" {
 
   node_config {
     # Production-grade machine type with sufficient resources
-    machine_type = "e2-standard-4"  # 4 vCPUs, 16GB RAM
-    disk_size_gb = 50               # Increased disk for observability data
-    disk_type    = "pd-ssd"         # SSD for better performance
-    
+    machine_type = "e2-standard-4" # 4 vCPUs, 16GB RAM
+    disk_size_gb = 50              # Increased disk for observability data
+    disk_type    = "pd-ssd"        # SSD for better performance
+
     # FIXED: Use only spot instances, not preemptible
-    spot = true  # Use spot instances for cost savings
+    spot = true # Use spot instances for cost savings
 
     oauth_scopes = [
       "https://www.googleapis.com/auth/cloud-platform"
@@ -146,8 +143,8 @@ resource "google_container_node_pool" "primary_nodes" {
   }
 
   upgrade_settings {
-    strategy = "SURGE"
-    max_surge = 1
+    strategy        = "SURGE"
+    max_surge       = 1
     max_unavailable = 0
   }
 }
@@ -166,10 +163,10 @@ resource "google_container_node_pool" "system_nodes" {
   }
 
   node_config {
-    machine_type = "e2-medium"  # 1 vCPU, 4GB RAM - sufficient for system workloads
+    machine_type = "e2-medium" # 1 vCPU, 4GB RAM - sufficient for system workloads
     disk_size_gb = 30
     disk_type    = "pd-standard"
-    
+
 
     oauth_scopes = [
       "https://www.googleapis.com/auth/cloud-platform"
@@ -241,7 +238,7 @@ resource "helm_release" "argocd" {
           "server.insecure" = true
         }
       }
-      
+
       controller = {
         replicas = 1
         resources = {

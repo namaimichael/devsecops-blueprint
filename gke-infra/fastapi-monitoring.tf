@@ -22,9 +22,9 @@ resource "kubernetes_manifest" "fastapi_service_monitor" {
       }
       endpoints = [
         {
-          port     = "http"
-          path     = "/metrics"
-          interval = "30s"
+          port          = "http"
+          path          = "/metrics"
+          interval      = "30s"
           scrapeTimeout = "10s"
         }
       ]
@@ -43,9 +43,9 @@ resource "kubernetes_manifest" "fastapi_prometheus_rules" {
       name      = "fastapi-slo-rules"
       namespace = "default"
       labels = {
-        app = "fastapi-app"
+        app        = "fastapi-app"
         prometheus = "kube-prometheus"
-        role = "alert-rules"
+        role       = "alert-rules"
       }
     }
     spec = {
@@ -76,11 +76,11 @@ resource "kubernetes_manifest" "fastapi_prometheus_rules" {
               for   = "2m"
               labels = {
                 severity = "critical"
-                service = "fastapi-app"
-                slo = "availability"
+                service  = "fastapi-app"
+                slo      = "availability"
               }
               annotations = {
-                summary = "FastAPI availability SLO violation"
+                summary     = "FastAPI availability SLO violation"
                 description = "FastAPI availability is {{ $value | humanizePercentage }} (below 99% SLO)"
                 runbook_url = "https://wiki.company.com/runbooks/fastapi-availability"
               }
@@ -92,11 +92,11 @@ resource "kubernetes_manifest" "fastapi_prometheus_rules" {
               for   = "2m"
               labels = {
                 severity = "warning"
-                service = "fastapi-app"
-                slo = "latency"
+                service  = "fastapi-app"
+                slo      = "latency"
               }
               annotations = {
-                summary = "FastAPI latency SLO violation"
+                summary     = "FastAPI latency SLO violation"
                 description = "FastAPI 95th percentile latency is {{ $value }}s (above 500ms SLO)"
                 runbook_url = "https://wiki.company.com/runbooks/fastapi-latency"
               }
@@ -108,10 +108,10 @@ resource "kubernetes_manifest" "fastapi_prometheus_rules" {
               for   = "1m"
               labels = {
                 severity = "warning"
-                service = "fastapi-app"
+                service  = "fastapi-app"
               }
               annotations = {
-                summary = "FastAPI application has high error rate"
+                summary     = "FastAPI application has high error rate"
                 description = "Error rate is {{ $value }} errors/second"
               }
             },
@@ -122,10 +122,10 @@ resource "kubernetes_manifest" "fastapi_prometheus_rules" {
               for   = "2m"
               labels = {
                 severity = "warning"
-                service = "fastapi-app"
+                service  = "fastapi-app"
               }
               annotations = {
-                summary = "FastAPI business operations failing"
+                summary     = "FastAPI business operations failing"
                 description = "Business operation failure rate is {{ $value }} failures/second"
               }
             },
@@ -136,10 +136,10 @@ resource "kubernetes_manifest" "fastapi_prometheus_rules" {
               for   = "1m"
               labels = {
                 severity = "critical"
-                service = "fastapi-app"
+                service  = "fastapi-app"
               }
               annotations = {
-                summary = "FastAPI application is down"
+                summary     = "FastAPI application is down"
                 description = "FastAPI application has been down for more than 1 minute"
                 runbook_url = "https://wiki.company.com/runbooks/fastapi-down"
               }
