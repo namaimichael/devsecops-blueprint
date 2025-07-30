@@ -148,7 +148,7 @@ jobs:
             terraform workspace select ${{ matrix.environment }} || terraform workspace new ${{ matrix.environment }}
             terraform plan -var-file="environments/${{ matrix.environment }}.tfvars" -input=false -out=tfplan
           else
-            terraform plan -input=false -out=tfplan
+            terraform plan -var-file="environments/${{ matrix.environment }}.tfvars" -input=false -out=tfplan
           fi
           terraform show -no-color tfplan > tfplan.txt
           
