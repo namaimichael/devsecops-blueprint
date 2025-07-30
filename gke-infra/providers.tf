@@ -51,11 +51,4 @@ provider "helm" {
     token                  = data.google_client_config.default.access_token
     cluster_ca_certificate = base64decode(google_container_cluster.gke_cluster_salus.master_auth[0].cluster_ca_certificate)
   }
-
-  # Ignore cluster resource changes during apply
-  registry {
-    url      = "oci://registry-1.docker.io"
-    username = ""
-    password = ""
-  }
 }
