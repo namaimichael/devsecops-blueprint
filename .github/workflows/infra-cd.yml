@@ -95,34 +95,22 @@ jobs:
       - name: Setup gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
         
-      - name: Create Terraform variable files if missing
+      # REMOVED: The problematic "Create Terraform variable files if missing" step
+      # We now use the committed environment-specific .tfvars files
+      
+      - name: Verify Environment Files Exist
         run: |
-          mkdir -p ${{ matrix.module }}/environments
-          
-          # Create default tfvars files if they don't exist
-          for env in dev stage prod; do
-            if [ ! -f "${{ matrix.module }}/environments/${env}.tfvars" ]; then
-              echo "# Default configuration for ${env}" > "${{ matrix.module }}/environments/${env}.tfvars"
-              echo "environment = \"${env}\"" >> "${{ matrix.module }}/environments/${env}.tfvars"
-              echo "project_id = \"${{ secrets.GOOGLE_PROJECT_ID }}\"" >> "${{ matrix.module }}/environments/${env}.tfvars"
-              
-              # Add environment-specific defaults
-              case $env in
-                dev)
-                  echo "region = \"us-central1\"" >> "${{ matrix.module }}/environments/${env}.tfvars"
-                  echo "node_count = 1" >> "${{ matrix.module }}/environments/${env}.tfvars"
-                  ;;
-                stage)
-                  echo "region = \"us-central1\"" >> "${{ matrix.module }}/environments/${env}.tfvars"
-                  echo "node_count = 2" >> "${{ matrix.module }}/environments/${env}.tfvars"
-                  ;;
-                prod)
-                  echo "region = \"us-east1\"" >> "${{ matrix.module }}/environments/${env}.tfvars"
-                  echo "node_count = 3" >> "${{ matrix.module }}/environments/${env}.tfvars"
-                  ;;
-              esac
-            fi
-          done
+          echo "Checking for environment files..."
+          if [ -f "${{ matrix.module }}/environments/${{ matrix.environment }}.tfvars" ]; then
+            echo "✅ Found ${{ matrix.module }}/environments/${{ matrix.environment }}.tfvars"
+            echo "File contents (first 5 lines):"
+            head -5 "${{ matrix.module }}/environments/${{ matrix.environment }}.tfvars"
+          else
+            echo "❌ Missing ${{ matrix.module }}/environments/${{ matrix.environment }}.tfvars"
+            echo "Available files in ${{ matrix.module }}/environments/:"
+            ls -la "${{ matrix.module }}/environments/" || echo "No environments directory"
+            exit 1
+          fi
       
       - name: Terraform Init
         run: |
