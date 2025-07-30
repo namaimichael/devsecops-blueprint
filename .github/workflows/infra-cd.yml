@@ -70,6 +70,10 @@ jobs:
       matrix:
         environment: [dev, stage, prod]
         module: [bootstrap-backend, gke-infra]
+    # Module + Environment specific concurrency
+    concurrency:
+      group: plan-${{ matrix.module }}-${{ matrix.environment }}
+      cancel-in-progress: false
     permissions:
       contents: read
       pull-requests: write
@@ -95,9 +99,6 @@ jobs:
       - name: Setup gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
         
-      # REMOVED: The problematic "Create Terraform variable files if missing" step
-      # We now use the committed environment-specific .tfvars files
-      
       - name: Verify Environment Files Exist
         run: |
           echo "Checking for environment files..."
@@ -188,6 +189,10 @@ jobs:
       matrix:
         environment: [dev]  # Only deploy to dev automatically
         module: [bootstrap-backend, gke-infra]
+    # Module + Environment specific concurrency for apply operations
+    concurrency:
+      group: apply-${{ matrix.module }}-${{ matrix.environment }}
+      cancel-in-progress: false
     environment: 
       name: ${{ matrix.environment }}
       url: ${{ steps.deploy.outputs.url }}
@@ -323,6 +328,10 @@ jobs:
       matrix:
         environment: [stage, prod]
         module: [bootstrap-backend, gke-infra]
+    # Module + Environment specific concurrency for manual deployments
+    concurrency:
+      group: deploy-${{ matrix.module }}-${{ matrix.environment }}
+      cancel-in-progress: false
     environment: 
       name: ${{ matrix.environment }}
       url: ${{ steps.deploy.outputs.url }}
