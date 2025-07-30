@@ -104,3 +104,16 @@ variable "notification_channels" {
   type        = list(string)
   default     = []
 }
+
+variable "slack_webhook_url" {
+  description = "Slack webhook URL for notifications"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "notification_email" {
+  description = "Email address for backup notifications"
+  type        = string
+  default     = ""
+}

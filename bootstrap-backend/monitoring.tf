@@ -1,3 +1,30 @@
+# Create Slack notification channel
+resource "google_monitoring_notification_channel" "slack_alerts" {
+  count        = var.enable_monitoring && var.slack_webhook_url != "" ? 1 : 0
+  display_name = "Slack Security Alerts"
+  type         = "slack"
+  
+  labels = {
+    channel_name = "#security-alerts"  # Update with your channel name
+    url          = var.slack_webhook_url
+  }
+
+  enabled = true
+}
+
+# Create email notification channel (backup)
+resource "google_monitoring_notification_channel" "email_alerts" {
+  count        = var.enable_monitoring && var.notification_email != "" ? 1 : 0
+  display_name = "Email Security Alerts"
+  type         = "email"
+  
+  labels = {
+    email_address = var.notification_email
+  }
+
+  enabled = true
+}
+
 # Alert for unauthorized access to state bucket (only if monitoring is enabled)
 resource "google_monitoring_alert_policy" "state_bucket_unauthorized_access" {
   count        = var.enable_monitoring ? 1 : 0
@@ -16,9 +43,8 @@ resource "google_monitoring_alert_policy" "state_bucket_unauthorized_access" {
       duration        = "300s"
 
       aggregations {
-        alignment_period   = "300s"
-        per_series_aligner = "ALIGN_RATE"
-        # Added cross_series_reducer for better aggregation
+        alignment_period     = "300s"
+        per_series_aligner   = "ALIGN_RATE"
         cross_series_reducer = "REDUCE_SUM"
         group_by_fields     = ["resource.labels.bucket_name"]
       }
@@ -30,11 +56,14 @@ resource "google_monitoring_alert_policy" "state_bucket_unauthorized_access" {
   }
 
   documentation {
-    content = "Unauthorized access detected to Terraform state bucket ${google_storage_bucket.tf_state.name}. Investigate immediately."
+    content = "🚨 SECURITY ALERT: Unauthorized access detected to Terraform state bucket ${google_storage_bucket.tf_state.name}. Investigate immediately.\n\nBucket: ${google_storage_bucket.tf_state.name}\nEnvironment: ${var.environment}\nProject: ${var.project_id}"
   }
 
-  # Notification channels commented out - add specific channels as needed
-  # notification_channels = ["projects/PROJECT_ID/notificationChannels/CHANNEL_ID"]
+  # Add notification channels
+  notification_channels = compact([
+    length(google_monitoring_notification_channel.slack_alerts) > 0 ? google_monitoring_notification_channel.slack_alerts[0].id : null,
+    length(google_monitoring_notification_channel.email_alerts) > 0 ? google_monitoring_notification_channel.email_alerts[0].id : null
+  ])
 }
 
 # Alternative: More specific alert for failed authentication attempts
@@ -68,8 +97,14 @@ resource "google_monitoring_alert_policy" "state_bucket_auth_failures" {
   }
 
   documentation {
-    content = "Multiple authentication failures detected on Terraform state bucket ${google_storage_bucket.tf_state.name}. Possible unauthorized access attempt."
+    content = "🔐 AUTH FAILURE ALERT: Multiple authentication failures detected on Terraform state bucket ${google_storage_bucket.tf_state.name}. Possible unauthorized access attempt.\n\nBucket: ${google_storage_bucket.tf_state.name}\nEnvironment: ${var.environment}\nThreshold: 5 failed attempts\nInvestigate source IPs and access patterns immediately."
   }
+
+  # Add notification channels  
+  notification_channels = compact([
+    length(google_monitoring_notification_channel.slack_alerts) > 0 ? google_monitoring_notification_channel.slack_alerts[0].id : null,
+    length(google_monitoring_notification_channel.email_alerts) > 0 ? google_monitoring_notification_channel.email_alerts[0].id : null
+  ])
 }
 
 # Log sink for state bucket access (optional)

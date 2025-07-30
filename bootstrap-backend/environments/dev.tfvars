@@ -17,4 +17,3 @@ additional_viewers = []
 retention_period_seconds = 2592000
 import_if_exists = false
 enable_monitoring = true
-notification_channels = []
