@@ -12,6 +12,12 @@ provider "google" {
   region  = var.location
 }
 
+# Import existing bucket if it exists
+import {
+  to = google_storage_bucket.tf_state
+  id = var.bucket_name
+}
+
 resource "google_storage_bucket" "tf_state" {
   name                        = var.bucket_name
   location                    = var.location
@@ -33,6 +39,11 @@ resource "google_storage_bucket" "tf_state" {
 
   labels = {
     owner = "devsecops-blueprint"
-    env   = "bootstrap"
+    env   = var.environment
+  }
+
+  # Prevent destruction of state bucket
+  lifecycle {
+    prevent_destroy = true
   }
 }
