@@ -9,7 +9,8 @@ resource "google_monitoring_alert_policy" "state_bucket_unauthorized_access" {
     display_name = "Unauthorized state bucket access detected"
 
     condition_threshold {
-      filter          = "resource.type=\"gcs_bucket\" AND resource.labels.bucket_name=\"${google_storage_bucket.tf_state.name}\""
+      # Fixed: Added specific metric type to avoid matching multiple metrics
+      filter          = "resource.type=\"gcs_bucket\" AND resource.labels.bucket_name=\"${google_storage_bucket.tf_state.name}\" AND metric.type=\"storage.googleapis.com/api/request_count\""
       comparison      = "COMPARISON_GT"
       threshold_value = 0
       duration        = "300s"
@@ -17,6 +18,9 @@ resource "google_monitoring_alert_policy" "state_bucket_unauthorized_access" {
       aggregations {
         alignment_period   = "300s"
         per_series_aligner = "ALIGN_RATE"
+        # Added cross_series_reducer for better aggregation
+        cross_series_reducer = "REDUCE_SUM"
+        group_by_fields     = ["resource.labels.bucket_name"]
       }
     }
   }
@@ -31,6 +35,41 @@ resource "google_monitoring_alert_policy" "state_bucket_unauthorized_access" {
 
   # Notification channels commented out - add specific channels as needed
   # notification_channels = ["projects/PROJECT_ID/notificationChannels/CHANNEL_ID"]
+}
+
+# Alternative: More specific alert for failed authentication attempts
+resource "google_monitoring_alert_policy" "state_bucket_auth_failures" {
+  count        = var.enable_monitoring ? 1 : 0
+  display_name = "Terraform State Bucket - Authentication Failures"
+  combiner     = "OR"
+  enabled      = true
+
+  conditions {
+    display_name = "Authentication failures on state bucket"
+
+    condition_threshold {
+      # Monitor authentication failures specifically
+      filter          = "resource.type=\"gcs_bucket\" AND resource.labels.bucket_name=\"${google_storage_bucket.tf_state.name}\" AND metric.type=\"storage.googleapis.com/authz/acl_based_object_access_count\""
+      comparison      = "COMPARISON_GT" 
+      threshold_value = 5 # Alert after 5 failed attempts
+      duration        = "300s"
+
+      aggregations {
+        alignment_period     = "300s"
+        per_series_aligner   = "ALIGN_RATE"
+        cross_series_reducer = "REDUCE_SUM"
+        group_by_fields     = ["resource.labels.bucket_name"]
+      }
+    }
+  }
+
+  alert_strategy {
+    auto_close = "604800s" # 7 days
+  }
+
+  documentation {
+    content = "Multiple authentication failures detected on Terraform state bucket ${google_storage_bucket.tf_state.name}. Possible unauthorized access attempt."
+  }
 }
 
 # Log sink for state bucket access (optional)
