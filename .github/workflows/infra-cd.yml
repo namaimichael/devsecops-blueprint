@@ -230,6 +230,7 @@ jobs:
           
           # Check if bucket exists and import if needed
           BUCKET_NAME="${{ secrets.GOOGLE_PROJECT_ID }}-tfstate-${{ matrix.environment }}-cicd"
+          IMPORTED_BUCKET=false
           
           echo "Checking if bucket $BUCKET_NAME exists..."
           if gsutil ls "gs://$BUCKET_NAME" 2>/dev/null; then
@@ -240,14 +241,25 @@ jobs:
               terraform import \
                 -var-file="environments/${{ matrix.environment }}.tfvars" \
                 google_storage_bucket.tf_state \
-                "$BUCKET_NAME" || {
-                echo "⚠️ Import failed, but continuing (bucket might already be imported)"
+                "$BUCKET_NAME" && {
+                echo "✅ Import successful, need to regenerate plan"
+                IMPORTED_BUCKET=true
+              } || {
+                echo "⚠️ Import failed, but continuing"
               }
             else
               echo "✅ Bucket already in Terraform state"
             fi
           else
             echo "ℹ️ Bucket doesn't exist, will be created by Terraform"
+          fi
+          
+          # If we imported the bucket, regenerate the plan
+          if [ "$IMPORTED_BUCKET" = "true" ]; then
+            echo "🔄 Regenerating plan after import..."
+            terraform plan -var-file="environments/${{ matrix.environment }}.tfvars" -input=false -out=tfplan-new
+            mv tfplan-new tfplan
+            echo "✅ Plan regenerated successfully"
           fi
       
       - name: Terraform Apply
@@ -353,6 +365,7 @@ jobs:
           
           # Check if bucket exists and import if needed
           BUCKET_NAME="${{ secrets.GOOGLE_PROJECT_ID }}-tfstate-${{ matrix.environment }}-cicd"
+          IMPORTED_BUCKET=false
           
           echo "Checking if bucket $BUCKET_NAME exists..."
           if gsutil ls "gs://$BUCKET_NAME" 2>/dev/null; then
@@ -363,14 +376,25 @@ jobs:
               terraform import \
                 -var-file="environments/${{ matrix.environment }}.tfvars" \
                 google_storage_bucket.tf_state \
-                "$BUCKET_NAME" || {
-                echo "⚠️ Import failed, but continuing (bucket might already be imported)"
+                "$BUCKET_NAME" && {
+                echo "✅ Import successful, need to regenerate plan"
+                IMPORTED_BUCKET=true
+              } || {
+                echo "⚠️ Import failed, but continuing"
               }
             else
               echo "✅ Bucket already in Terraform state"
             fi
           else
             echo "ℹ️ Bucket doesn't exist, will be created by Terraform"
+          fi
+          
+          # If we imported the bucket, regenerate the plan
+          if [ "$IMPORTED_BUCKET" = "true" ]; then
+            echo "🔄 Regenerating plan after import..."
+            terraform plan -var-file="environments/${{ matrix.environment }}.tfvars" -input=false -out=tfplan-new
+            mv tfplan-new tfplan
+            echo "✅ Plan regenerated successfully"
           fi
       
       - name: Terraform Apply
