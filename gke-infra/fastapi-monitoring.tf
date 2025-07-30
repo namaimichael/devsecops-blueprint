@@ -3,7 +3,7 @@
 # =====================================================
 
 # ServiceMonitor for FastAPI app metrics
-  
+
 resource "kubernetes_manifest" "fastapi_service_monitor" {
   count = 0
   manifest = {

@@ -1,6 +1,6 @@
 resource "kubernetes_namespace" "monitoring" {
   count = 0
-  
+
   metadata {
     name = "monitoring"
     labels = {
@@ -14,7 +14,7 @@ resource "kubernetes_namespace" "monitoring" {
 
 resource "kubernetes_namespace" "logging" {
   count = 0
-  
+
   metadata {
     name = "logging"
     labels = {
@@ -28,7 +28,7 @@ resource "kubernetes_namespace" "logging" {
 
 resource "helm_release" "kube_prometheus_stack" {
   count = 0
-  
+
   name       = "kube-prometheus-stack"
   repository = "https://prometheus-community.github.io/helm-charts"
   chart      = "kube-prometheus-stack"
@@ -299,7 +299,7 @@ resource "random_password" "grafana_password" {
 
 resource "helm_release" "loki" {
   count = 0
-  
+
   name       = "loki"
   repository = "https://grafana.github.io/helm-charts"
   chart      = "loki"
@@ -393,7 +393,7 @@ resource "helm_release" "loki" {
 
 resource "helm_release" "fluent_bit" {
   count = 0
-  
+
   name       = "fluent-bit"
   repository = "https://fluent.github.io/helm-charts"
   chart      = "fluent-bit"
