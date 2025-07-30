@@ -1,6 +1,22 @@
 name: Infrastructure CD Pipeline
 
 on:
+  workflow_dispatch:
+    inputs:
+      deploy_environment:
+        description: 'Environment to deploy (stage, prod, or both)'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+        - stage
+        - prod
+        - both
+      confirm_production:
+        description: 'Type CONFIRM to deploy to production'
+        required: false
+        default: ''
+        
   push:
     branches: [ main ]
     paths:
