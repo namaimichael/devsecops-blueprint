@@ -1,4 +1,6 @@
 resource "kubernetes_namespace" "monitoring" {
+  count = var.deploy_k8s_resources ? 1 : 0
+  
   metadata {
     name = "monitoring"
     labels = {
@@ -11,6 +13,8 @@ resource "kubernetes_namespace" "monitoring" {
 }
 
 resource "kubernetes_namespace" "logging" {
+  count = var.deploy_k8s_resources ? 1 : 0
+  
   metadata {
     name = "logging"
     labels = {
@@ -23,11 +27,13 @@ resource "kubernetes_namespace" "logging" {
 }
 
 resource "helm_release" "kube_prometheus_stack" {
+  count = var.deploy_k8s_resources ? 1 : 0
+  
   name       = "kube-prometheus-stack"
   repository = "https://prometheus-community.github.io/helm-charts"
   chart      = "kube-prometheus-stack"
   version    = "56.21.4"
-  namespace  = kubernetes_namespace.monitoring.metadata[0].name
+  namespace  = kubernetes_namespace.monitoring[0].metadata[0].name
 
   create_namespace = false
   wait             = true
@@ -292,11 +298,13 @@ resource "random_password" "grafana_password" {
 }
 
 resource "helm_release" "loki" {
+  count = var.deploy_k8s_resources ? 1 : 0
+  
   name       = "loki"
   repository = "https://grafana.github.io/helm-charts"
   chart      = "loki"
   version    = "5.47.2"
-  namespace  = kubernetes_namespace.logging.metadata[0].name
+  namespace  = kubernetes_namespace.logging[0].metadata[0].name
 
   create_namespace = false
   wait             = true
@@ -384,11 +392,13 @@ resource "helm_release" "loki" {
 }
 
 resource "helm_release" "fluent_bit" {
+  count = var.deploy_k8s_resources ? 1 : 0
+  
   name       = "fluent-bit"
   repository = "https://fluent.github.io/helm-charts"
   chart      = "fluent-bit"
   version    = "0.46.7"
-  namespace  = kubernetes_namespace.logging.metadata[0].name
+  namespace  = kubernetes_namespace.logging[0].metadata[0].name
 
   wait    = true
   timeout = 300

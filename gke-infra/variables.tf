@@ -102,3 +102,9 @@ variable "enable_pod_security_standards" {
   type        = bool
   default     = true
 }
+
+variable "deploy_k8s_resources" {
+  description = "Whether to deploy Kubernetes resources (namespaces, helm charts, etc.)"
+  type        = bool
+  default     = false
+}

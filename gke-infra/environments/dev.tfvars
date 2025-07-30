@@ -27,3 +27,6 @@ monitoring_retention_days = 15
 enable_workload_identity      = true
 enable_network_policy        = true
 enable_pod_security_standards = true
+
+# Conditional deployment (disable K8s resources until cluster exists)
+deploy_k8s_resources = false

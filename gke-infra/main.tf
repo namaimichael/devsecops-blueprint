@@ -1,4 +1,3 @@
-
 // GKE Cluster - Enhanced for Production with Security Best Practices
 resource "google_container_cluster" "gke_cluster_salus" {
   name                     = "devsecops-gke-salus"
@@ -207,6 +206,8 @@ resource "google_container_node_pool" "system_nodes" {
 // ────────────────────────────────────────────────────────────────────────────
 // Install Argo CD via Helm - Enhanced for Production
 resource "helm_release" "argocd" {
+  count = var.deploy_k8s_resources ? 1 : 0
+  
   name             = "argocd"
   repository       = "https://argoproj.github.io/argo-helm"
   chart            = "argo-cd"
@@ -289,6 +290,8 @@ resource "helm_release" "argocd" {
 // ────────────────────────────────────────────────────────────────────────────
 // Argo CD "app-of-apps" root Application
 resource "kubernetes_manifest" "argocd_root_app" {
+  count = var.deploy_k8s_resources ? 1 : 0
+  
   depends_on = [
     helm_release.argocd
   ]
@@ -297,6 +300,8 @@ resource "kubernetes_manifest" "argocd_root_app" {
 
 // Argo CD Image Updater - Enhanced
 resource "helm_release" "argocd_image_updater" {
+  count = var.deploy_k8s_resources ? 1 : 0
+  
   name             = "argocd-image-updater"
   repository       = "https://argoproj.github.io/argo-helm"
   chart            = "argocd-image-updater"
@@ -325,6 +330,8 @@ resource "helm_release" "argocd_image_updater" {
 // ────────────────────────────────────────────────────────────────────────────
 // FastAPI child Application
 resource "kubernetes_manifest" "fastapi_app" {
+  count = var.deploy_k8s_resources ? 1 : 0
+  
   depends_on = [
     kubernetes_manifest.argocd_root_app
   ]
