@@ -29,26 +29,33 @@ provider "google" {
 data "google_client_config" "default" {}
 
 # ——————————————————————————————————————————————————————————————————————————
-# Read GKE cluster to configure K8s/Helm providers
-data "google_container_cluster" "primary" {
-  name     = google_container_cluster.gke_cluster_salus.name
-  location = var.region
-}
-
-# ——————————————————————————————————————————————————————————————————————————
 # Kubernetes provider wired to your GKE cluster
+# Uses the cluster resource directly instead of data source to avoid dependency issues
 provider "kubernetes" {
-  host                   = "https://${data.google_container_cluster.primary.endpoint}"
+  host                   = "https://${google_container_cluster.gke_cluster_salus.endpoint}"
   token                  = data.google_client_config.default.access_token
-  cluster_ca_certificate = base64decode(data.google_container_cluster.primary.master_auth[0].cluster_ca_certificate)
+  cluster_ca_certificate = base64decode(google_container_cluster.gke_cluster_salus.master_auth[0].cluster_ca_certificate)
+
+  # Ignore cluster resource changes during apply
+  ignore_annotations = [
+    "^autopilot\\.gke\\.io\\/.*",
+    "^cloud\\.google\\.com\\/.*"
+  ]
 }
 
 # ——————————————————————————————————————————————————————————————————————————
 # Helm provider pointed at the same cluster
 provider "helm" {
   kubernetes = {
-    host                   = "https://${data.google_container_cluster.primary.endpoint}"
+    host                   = "https://${google_container_cluster.gke_cluster_salus.endpoint}"
     token                  = data.google_client_config.default.access_token
-    cluster_ca_certificate = base64decode(data.google_container_cluster.primary.master_auth[0].cluster_ca_certificate)
+    cluster_ca_certificate = base64decode(google_container_cluster.gke_cluster_salus.master_auth[0].cluster_ca_certificate)
+  }
+
+  # Ignore cluster resource changes during apply
+  registry {
+    url      = "oci://registry-1.docker.io"
+    username = ""
+    password = ""
   }
 }
