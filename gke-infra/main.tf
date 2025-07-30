@@ -45,20 +45,20 @@ resource "google_container_cluster" "gke_cluster_salus" {
     }
   }
 
-  master_authorized_networks_config {
-    cidr_blocks {
-      cidr_block   = "69.166.236.89/32" // Replace with your specific allowed IP range
-      display_name = "My Public IP"
-    }
-  }
+  # master_authorized_networks_config {
+  #   cidr_blocks {
+  #     cidr_block   = "69.166.236.89/32" // Replace with your specific allowed IP range
+  #     display_name = "My Public IP"
+  #   }
+  # }
 
   # network_config {
   #   enable_intra_node_visibility = true
   # }
 
   ip_allocation_policy {
-    cluster_secondary_range_name  = "pods"
-    services_secondary_range_name = "services"
+    # cluster_secondary_range_name  = "pods"
+    # services_secondary_range_name = "services"
   }
 
   cluster_autoscaling {
