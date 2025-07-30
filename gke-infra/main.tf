@@ -327,7 +327,6 @@ resource "helm_release" "argocd_image_updater" {
   depends_on = [helm_release.argocd]
 }
 
-// ────────────────────────────────────────────────────────────────────────────
 // FastAPI child Application
 resource "kubernetes_manifest" "fastapi_app" {
   count = 0
