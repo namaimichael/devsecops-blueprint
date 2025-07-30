@@ -108,8 +108,3 @@ variable "deploy_k8s_resources" {
   type        = bool
   default     = false
 }
-variable "billing_account_id" {
-  description = "The billing account ID to associate with the project"
-  type        = string
-  default     = ""
-}
