@@ -223,6 +223,30 @@ jobs:
           cd ${{ matrix.module }}
           terraform init -input=false
       
+      - name: Handle Existing Resources
+        if: matrix.module == 'bootstrap-backend'
+        run: |
+          cd ${{ matrix.module }}
+          
+          # Check if bucket exists and import if needed
+          BUCKET_NAME="${{ secrets.GOOGLE_PROJECT_ID }}-tfstate-${{ matrix.environment }}-cicd"
+          
+          echo "Checking if bucket $BUCKET_NAME exists..."
+          if gsutil ls "gs://$BUCKET_NAME" 2>/dev/null; then
+            echo "✅ Bucket exists, checking if it's in Terraform state..."
+            
+            if ! terraform state show google_storage_bucket.tf_state 2>/dev/null; then
+              echo "📦 Importing existing bucket into Terraform state..."
+              terraform import google_storage_bucket.tf_state "$BUCKET_NAME" || {
+                echo "⚠️ Import failed, but continuing (bucket might already be imported)"
+              }
+            else
+              echo "✅ Bucket already in Terraform state"
+            fi
+          else
+            echo "ℹ️ Bucket doesn't exist, will be created by Terraform"
+          fi
+      
       - name: Terraform Apply
         id: deploy
         run: |
@@ -318,6 +342,30 @@ jobs:
         run: |
           cd ${{ matrix.module }}
           terraform init -input=false
+      
+      - name: Handle Existing Resources
+        if: matrix.module == 'bootstrap-backend'
+        run: |
+          cd ${{ matrix.module }}
+          
+          # Check if bucket exists and import if needed
+          BUCKET_NAME="${{ secrets.GOOGLE_PROJECT_ID }}-tfstate-${{ matrix.environment }}-cicd"
+          
+          echo "Checking if bucket $BUCKET_NAME exists..."
+          if gsutil ls "gs://$BUCKET_NAME" 2>/dev/null; then
+            echo "✅ Bucket exists, checking if it's in Terraform state..."
+            
+            if ! terraform state show google_storage_bucket.tf_state 2>/dev/null; then
+              echo "📦 Importing existing bucket into Terraform state..."
+              terraform import google_storage_bucket.tf_state "$BUCKET_NAME" || {
+                echo "⚠️ Import failed, but continuing (bucket might already be imported)"
+              }
+            else
+              echo "✅ Bucket already in Terraform state"
+            fi
+          else
+            echo "ℹ️ Bucket doesn't exist, will be created by Terraform"
+          fi
       
       - name: Terraform Apply
         id: deploy
