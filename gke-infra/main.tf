@@ -1,4 +1,8 @@
-// GKE Cluster - Enhanced for Production (Fixed Network Policy)
+release_channel {
+  channel = "REGULAR"
+}
+
+// GKE Cluster - Enhanced for Production with Security Best Practices
 resource "google_container_cluster" "gke_cluster_salus" {
   name                     = "devsecops-gke-salus"
   location                 = var.region
@@ -10,9 +14,12 @@ resource "google_container_cluster" "gke_cluster_salus" {
   network    = var.network
   subnetwork = var.subnetwork
 
-  # Enhanced cluster features for production
   workload_identity_config {
     workload_pool = "${var.project_id}.svc.id.goog"
+  }
+
+  release_channel {
+    channel = "REGULAR"
   }
 
   addons_config {
@@ -22,19 +29,42 @@ resource "google_container_cluster" "gke_cluster_salus" {
     gcp_filestore_csi_driver_config {
       enabled = true
     }
-    # Enable network policy addon
     network_policy_config {
       disabled = false
     }
   }
 
-  # Enable network policy for security - Fixed configuration
   network_policy {
     enabled  = true
-    provider = "CALICO"  # Explicitly specify Calico as the provider
+    provider = "CALICO"
   }
 
-  # Cluster autoscaling
+  binary_authorization {
+    evaluation_mode = "PROJECT_SINGLETON_POLICY_ENFORCE"
+  }
+
+  master_auth {
+    client_certificate_config {
+      issue_client_certificate = false
+    }
+  }
+
+  master_authorized_networks_config {
+    cidr_blocks {
+      cidr_block   = "69.166.236.89/32"  // Replace with your specific allowed IP range
+      display_name = "My Public IP"
+    }
+  }
+
+  network_config {
+    enable_intra_node_visibility = true
+  }
+
+  ip_allocation_policy {
+    cluster_secondary_range_name  = "pods"
+    services_secondary_range_name = "services"
+  }
+
   cluster_autoscaling {
     enabled = true
     resource_limits {
