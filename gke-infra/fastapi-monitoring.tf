@@ -3,7 +3,9 @@
 # =====================================================
 
 # ServiceMonitor for FastAPI app metrics
+  
 resource "kubernetes_manifest" "fastapi_service_monitor" {
+  count = 0
   manifest = {
     apiVersion = "monitoring.coreos.com/v1"
     kind       = "ServiceMonitor"
@@ -36,6 +38,7 @@ resource "kubernetes_manifest" "fastapi_service_monitor" {
 
 # PrometheusRule for FastAPI SLI/SLO alerts
 resource "kubernetes_manifest" "fastapi_prometheus_rules" {
+  count = 0
   manifest = {
     apiVersion = "monitoring.coreos.com/v1"
     kind       = "PrometheusRule"
