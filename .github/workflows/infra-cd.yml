@@ -237,7 +237,10 @@ jobs:
             
             if ! terraform state show google_storage_bucket.tf_state 2>/dev/null; then
               echo "📦 Importing existing bucket into Terraform state..."
-              terraform import google_storage_bucket.tf_state "$BUCKET_NAME" || {
+              terraform import \
+                -var-file="environments/${{ matrix.environment }}.tfvars" \
+                google_storage_bucket.tf_state \
+                "$BUCKET_NAME" || {
                 echo "⚠️ Import failed, but continuing (bucket might already be imported)"
               }
             else
