@@ -86,8 +86,6 @@ jobs:
           project_id: ${{ secrets.GOOGLE_PROJECT_ID }}
           token_format: 'access_token'
           access_token_lifetime: '3600s'
-        timeout-minutes: 5
-        retry: 3
       
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
