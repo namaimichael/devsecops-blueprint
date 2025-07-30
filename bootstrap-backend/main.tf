@@ -1,49 +1,91 @@
 terraform {
+  required_version = ">= 1.0"
   required_providers {
     google = {
       source  = "hashicorp/google"
-      version = ">= 4.0"
+      version = ">= 5.0"
     }
   }
 }
 
-provider "google" {
-  project = var.project_id
-  region  = var.location
+locals {
+  # Generate unique bucket name based on project, environment, and deployment context
+  bucket_name = "${var.project_id}-tfstate-${var.environment}-${var.deployment_context}"
+  
+  # Labels for resource management
+  common_labels = {
+    managed_by    = "terraform"
+    project       = "devsecops-blueprint"
+    environment   = var.environment
+    context       = var.deployment_context
+    created_by    = var.created_by
+  }
 }
 
-# Import existing bucket if it exists
-import {
-  to = google_storage_bucket.tf_state
-  id = var.bucket_name
+# Data source to check if bucket exists
+data "google_storage_bucket" "existing" {
+  name  = local.bucket_name
+  count = var.import_if_exists ? 1 : 0
+  
+  # Continue if bucket doesn't exist
+  lifecycle {
+    postcondition {
+      condition = can(self.name)
+      error_message = "Bucket ${local.bucket_name} not found for import"
+    }
+  }
 }
 
 resource "google_storage_bucket" "tf_state" {
-  name                        = var.bucket_name
-  location                    = var.location
-  force_destroy               = false
+  name                        = local.bucket_name
+  location                    = var.region
+  storage_class              = var.storage_class
+  force_destroy              = var.environment == "dev" ? var.allow_force_destroy : false
   uniform_bucket_level_access = true
 
   versioning {
     enabled = true
   }
 
-  lifecycle_rule {
-    condition {
-      age = 30
-    }
-    action {
-      type = "Delete"
+  # Lifecycle management based on environment
+  dynamic "lifecycle_rule" {
+    for_each = var.lifecycle_rules
+    content {
+      condition {
+        age = lifecycle_rule.value.age
+      }
+      action {
+        type = lifecycle_rule.value.action
+      }
     }
   }
 
-  labels = {
-    owner = "devsecops-blueprint"
-    env   = var.environment
+  # Object retention for production
+  dynamic "retention_policy" {
+    for_each = var.environment == "prod" ? [1] : []
+    content {
+      retention_period = var.retention_period_seconds
+    }
   }
 
-  # Prevent destruction of state bucket
+  labels = local.common_labels
+
+  # Prevent accidental deletion
   lifecycle {
-    prevent_destroy = true
+    prevent_destroy = var.environment == "prod" ? true : false
   }
+}
+
+# IAM for state bucket
+resource "google_storage_bucket_iam_member" "tf_state_admin" {
+  bucket = google_storage_bucket.tf_state.name
+  role   = "roles/storage.admin"
+  member = "serviceAccount:${var.terraform_service_account}"
+}
+
+resource "google_storage_bucket_iam_member" "tf_state_viewer" {
+  for_each = toset(var.additional_viewers)
+  bucket   = google_storage_bucket.tf_state.name
+  role     = "roles/storage.objectViewer"
+  member   = each.value
 }
