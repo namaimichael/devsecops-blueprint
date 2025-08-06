@@ -1,0 +1,1363 @@
+name: Complete Infrastructure Destroy Pipeline
+
+# This comprehensive pipeline can destroy all GCP resources managed by Terraform
+# Supports multiple environments, modules, and handles edge cases like state drift
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to destroy'
+        required: true
+        type: choice
+        options:
+        - dev
+        - stage
+        - prod
+        - all
+        default: 'dev'
+      module:
+        description: 'Module to destroy'
+        required: true
+        type: choice
+        options:
+        - bootstrap-backend
+        - gke-infra
+        - all
+        default: 'all'
+      confirm_destroy:
+        description: 'Type DESTROY to confirm destruction'
+        required: true
+        type: string
+      dry_run:
+        description: 'Perform dry run only (show what would be destroyed)'
+        required: false
+        type: boolean
+        default: true
+      force_cleanup:
+        description: 'Force cleanup even if Terraform fails'
+        required: false
+        type: boolean
+        default: false
+      cleanup_method:
+        description: 'Cleanup method to use'
+        required: false
+        type: choice
+        options:
+        - terraform
+        - gcloud
+        - both
+        default: 'terraform'
+
+env:
+  TF_VERSION: "1.6.0"
+  TF_LOG: INFO
+  PROJECT_ID: ${{ secrets.GOOGLE_PROJECT_ID }}
+
+jobs:
+  # =============================================================================
+  # VALIDATION & SETUP
+  # =============================================================================
+  validate-inputs:
+    name: Validate Destroy Request
+    runs-on: ubuntu-latest
+    outputs:
+      environments: ${{ steps.set-matrix.outputs.environments }}
+      modules: ${{ steps.set-matrix.outputs.modules }}
+      should_proceed: ${{ steps.validation.outputs.should_proceed }}
+    steps:
+      - name: Validate Confirmation
+        id: validation
+        run: |
+          if [ "${{ github.event.inputs.confirm_destroy }}" != "DESTROY" ]; then
+            echo "❌ Destruction not confirmed. Please type DESTROY to confirm."
+            echo "should_proceed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "✅ Destruction confirmed by ${{ github.actor }}"
+          echo "🎯 Target: ${{ github.event.inputs.environment }}/${{ github.event.inputs.module }}"
+          echo "🔄 Mode: ${{ github.event.inputs.dry_run == 'true' && 'DRY RUN' || 'LIVE DESTRUCTION' }}"
+          echo "should_proceed=true" >> $GITHUB_OUTPUT
+      
+      - name: Set Matrix Values
+        id: set-matrix
+        run: |
+          # Set environments
+          if [ "${{ github.event.inputs.environment }}" = "all" ]; then
+            echo "environments=[\"dev\",\"stage\",\"prod\"]" >> $GITHUB_OUTPUT
+          else
+            echo "environments=[\"${{ github.event.inputs.environment }}\"]" >> $GITHUB_OUTPUT
+          fi
+          
+          # Set modules (destroy in proper order: gke-infra first, then bootstrap-backend)
+          if [ "${{ github.event.inputs.module }}" = "all" ]; then
+            echo "modules=[\"gke-infra\",\"bootstrap-backend\"]" >> $GITHUB_OUTPUT
+          else
+            echo "modules=[\"${{ github.event.inputs.module }}\"]" >> $GITHUB_OUTPUT
+          fi
+
+  # =============================================================================
+  # DISCOVERY & AUDIT
+  # =============================================================================
+  pre-destruction-audit:
+    name: Pre-Destruction Resource Audit
+    runs-on: ubuntu-latest
+    needs: validate-inputs
+    if: needs.validate-inputs.outputs.should_proceed == 'true'
+    strategy:
+      matrix:
+        environment: ${{ fromJson(needs.validate-inputs.outputs.environments) }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ env.PROJECT_ID }}
+      
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+      
+      - name: Comprehensive Resource Discovery
+        run: |
+          echo "# 🔍 GCP Resource Audit Report" > audit-${{ matrix.environment }}.md
+          echo "**Environment**: ${{ matrix.environment }}" >> audit-${{ matrix.environment }}.md
+          echo "**Generated**: $(date)" >> audit-${{ matrix.environment }}.md
+          echo "**Project**: ${{ env.PROJECT_ID }}" >> audit-${{ matrix.environment }}.md
+          echo "" >> audit-${{ matrix.environment }}.md
+          
+          # Function to audit resources
+          audit_resource() {
+            local resource_type="$1"
+            local command="$2"
+            local filter="${3:-}"
+            
+            echo "## $resource_type" >> audit-${{ matrix.environment }}.md
+            echo "" >> audit-${{ matrix.environment }}.md
+            
+            if [ -n "$filter" ]; then
+              full_command="$command --filter=\"$filter\""
+            else
+              full_command="$command"
+            fi
+            
+            if eval "$full_command" 2>/dev/null | tail -n +2 | grep -q .; then
+              echo '```' >> audit-${{ matrix.environment }}.md
+              eval "$full_command" 2>/dev/null >> audit-${{ matrix.environment }}.md
+              echo '```' >> audit-${{ matrix.environment }}.md
+              echo "❌ **RESOURCES FOUND - WILL BE DESTROYED**" >> audit-${{ matrix.environment }}.md
+              
+              # Count resources for cost estimation
+              count=$(eval "$full_command" 2>/dev/null | tail -n +2 | wc -l)
+              echo "**Count**: $count resources" >> audit-${{ matrix.environment }}.md
+            else
+              echo "✅ No $resource_type found" >> audit-${{ matrix.environment }}.md
+            fi
+            echo "" >> audit-${{ matrix.environment }}.md
+          }
+          
+          # Audit all resource types
+          audit_resource "GKE Clusters" \
+            "gcloud container clusters list --project=${{ env.PROJECT_ID }} --format='table(name,location,status,currentNodeCount,nodeConfig.machineType)'"
+          
+          audit_resource "Compute Instances" \
+            "gcloud compute instances list --project=${{ env.PROJECT_ID }} --format='table(name,zone,status,machineType,preemptible)'"
+          
+          audit_resource "Node Pools" \
+            "gcloud container node-pools list --project=${{ env.PROJECT_ID }} --format='table(name,cluster,status,autoscaling.enabled,initialNodeCount)'"
+          
+          audit_resource "Load Balancers" \
+            "gcloud compute forwarding-rules list --project=${{ env.PROJECT_ID }} --format='table(name,region,IPAddress,target)'"
+          
+          audit_resource "VPC Networks (Custom)" \
+            "gcloud compute networks list --project=${{ env.PROJECT_ID }} --format='table(name,subnet_mode,bgp_routing_mode)'" \
+            "name != default"
+          
+          audit_resource "Firewall Rules (Custom)" \
+            "gcloud compute firewall-rules list --project=${{ env.PROJECT_ID }} --format='table(name,direction,priority,sourceRanges.list())'" \
+            "NOT name:(default-allow-icmp OR default-allow-internal OR default-allow-rdp OR default-allow-ssh)"
+          
+          audit_resource "Storage Buckets (Project)" \
+            "gsutil ls -p ${{ env.PROJECT_ID }}"
+          
+          audit_resource "Service Accounts (Custom)" \
+            "gcloud iam service-accounts list --project=${{ env.PROJECT_ID }} --format='table(email,displayName,disabled)'" \
+            "NOT email:*compute@developer.gserviceaccount.com"
+          
+          audit_resource "Static IP Addresses" \
+            "gcloud compute addresses list --project=${{ env.PROJECT_ID }} --format='table(name,region,address,status,users[])'"
+          
+          audit_resource "Persistent Disks" \
+            "gcloud compute disks list --project=${{ env.PROJECT_ID }} --format='table(name,zone,sizeGb,type,status,users[])'"
+          
+          audit_resource "Cloud SQL Instances" \
+            "gcloud sql instances list --project=${{ env.PROJECT_ID }} --format='table(name,database_version,region,tier,status)'"
+          
+          audit_resource "Cloud Storage (Detailed)" \
+            "gsutil ls -L gs://*${{ env.PROJECT_ID }}* 2>/dev/null | head -50"
+          
+          audit_resource "Cloud Functions" \
+            "gcloud functions list --project=${{ env.PROJECT_ID }} --format='table(name,status,trigger,runtime)'"
+          
+          audit_resource "Cloud Run Services" \
+            "gcloud run services list --project=${{ env.PROJECT_ID }} --format='table(name,region,url,lastModifier)'"
+          
+          audit_resource "Secrets Manager" \
+            "gcloud secrets list --project=${{ env.PROJECT_ID }} --format='table(name,created,labels)'"
+          
+          # Estimate potential cost savings
+          echo "## 💰 Cost Impact Analysis" >> audit-${{ matrix.environment }}.md
+          echo "" >> audit-${{ matrix.environment }}.md
+          
+          # Count major cost drivers
+          gke_clusters=$(gcloud container clusters list --project=${{ env.PROJECT_ID }} --format="value(name)" 2>/dev/null | wc -l)
+          compute_instances=$(gcloud compute instances list --project=${{ env.PROJECT_ID }} --format="value(name)" 2>/dev/null | wc -l)
+          sql_instances=$(gcloud sql instances list --project=${{ env.PROJECT_ID }} --format="value(name)" 2>/dev/null | wc -l)
+          
+          echo "**High-Cost Resources to be Destroyed:**" >> audit-${{ matrix.environment }}.md
+          echo "- GKE Clusters: $gke_clusters" >> audit-${{ matrix.environment }}.md
+          echo "- Compute Instances: $compute_instances" >> audit-${{ matrix.environment }}.md
+          echo "- Cloud SQL Instances: $sql_instances" >> audit-${{ matrix.environment }}.md
+          echo "" >> audit-${{ matrix.environment }}.md
+          
+          if [ "$gke_clusters" -gt 0 ] || [ "$compute_instances" -gt 0 ] || [ "$sql_instances" -gt 0 ]; then
+            echo "⚠️ **SIGNIFICANT COST SAVINGS EXPECTED**" >> audit-${{ matrix.environment }}.md
+          else
+            echo "✅ **LOW COST IMPACT - Mostly storage and minimal services**" >> audit-${{ matrix.environment }}.md
+          fi
+          
+          echo "" >> audit-${{ matrix.environment }}.md
+          echo "---" >> audit-${{ matrix.environment }}.md
+          echo "*Report generated by Infrastructure Destroy Pipeline*" >> audit-${{ matrix.environment }}.md
+          
+          # Display summary in logs
+          echo "💡 Next Steps:"
+          echo "============="
+          echo "1. Check the final destruction report artifact"
+          echo "2. Verify GCP billing shows cost reduction"
+          echo "3. Update team documentation"
+          echo "4. Clean up local .terraform directories if needed"
+          echo ""
+          echo "🎉 Infrastructure destruction pipeline completed!"echo "📋 AUDIT SUMMARY FOR ${{ matrix.environment }}:"
+          echo "============================================"
+          echo "GKE Clusters: $gke_clusters"
+          echo "Compute Instances: $compute_instances"
+          echo "SQL Instances: $sql_instances"
+          echo ""
+          cat audit-${{ matrix.environment }}.md
+      
+      - name: Upload Audit Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-report-${{ matrix.environment }}
+          path: audit-${{ matrix.environment }}.md
+          retention-days: 30
+
+  # =============================================================================
+  # TERRAFORM STATE ANALYSIS
+  # =============================================================================
+  terraform-state-analysis:
+    name: Terraform State Analysis
+    runs-on: ubuntu-latest
+    needs: validate-inputs
+    if: needs.validate-inputs.outputs.should_proceed == 'true'
+    strategy:
+      matrix:
+        environment: ${{ fromJson(needs.validate-inputs.outputs.environments) }}
+        module: ${{ fromJson(needs.validate-inputs.outputs.modules) }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ env.PROJECT_ID }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+      
+      - name: Initialize and Analyze Terraform State
+        run: |
+          cd ${{ matrix.module }}
+          
+          echo "🏗️ Analyzing Terraform State: ${{ matrix.module }} (${{ matrix.environment }})"
+          echo "=========================================================================="
+          
+          # Initialize Terraform
+          terraform init -input=false
+          
+          # Handle workspace for gke-infra
+          if [ "${{ matrix.module }}" = "gke-infra" ]; then
+            echo "🔄 Managing workspace: ${{ matrix.environment }}"
+            if terraform workspace select ${{ matrix.environment }} 2>/dev/null; then
+              echo "✅ Workspace ${{ matrix.environment }} selected"
+            else
+              echo "⚠️ Workspace ${{ matrix.environment }} doesn't exist"
+              terraform workspace list
+              echo "📋 Available workspaces listed above"
+              echo "WORKSPACE_EXISTS=false" >> $GITHUB_ENV
+              exit 0
+            fi
+          fi
+          
+          # Check if environment file exists
+          if [ ! -f "environments/${{ matrix.environment }}.tfvars" ]; then
+            echo "⚠️ No tfvars file found for ${{ matrix.environment }}"
+            echo "📁 Available environment files:"
+            ls -la environments/ || echo "No environments directory"
+            echo "TFVARS_EXISTS=false" >> $GITHUB_ENV
+            exit 0
+          fi
+          
+          echo "TFVARS_EXISTS=true" >> $GITHUB_ENV
+          echo "WORKSPACE_EXISTS=true" >> $GITHUB_ENV
+          
+          # Refresh state to ensure accuracy
+          echo "🔄 Refreshing state..."
+          terraform refresh -var-file="environments/${{ matrix.environment }}.tfvars" -input=false || {
+            echo "⚠️ State refresh failed, continuing with existing state"
+          }
+          
+          # Analyze current state
+          echo "📋 Resources in Terraform state:"
+          if terraform state list >/dev/null 2>&1; then
+            state_resources=$(terraform state list)
+            if [ -n "$state_resources" ]; then
+              echo "$state_resources" | while read -r resource; do
+                echo "  🔸 $resource"
+              done
+              
+              resource_count=$(echo "$state_resources" | wc -l)
+              echo ""
+              echo "📊 Total managed resources: $resource_count"
+              echo "RESOURCE_COUNT=$resource_count" >> $GITHUB_ENV
+              
+              # Generate state summary
+              echo "📝 State Summary:" > state-summary-${{ matrix.module }}-${{ matrix.environment }}.txt
+              echo "Module: ${{ matrix.module }}" >> state-summary-${{ matrix.module }}-${{ matrix.environment }}.txt
+              echo "Environment: ${{ matrix.environment }}" >> state-summary-${{ matrix.module }}-${{ matrix.environment }}.txt
+              echo "Resources: $resource_count" >> state-summary-${{ matrix.module }}-${{ matrix.environment }}.txt
+              echo "" >> state-summary-${{ matrix.module }}-${{ matrix.environment }}.txt
+              echo "Resource List:" >> state-summary-${{ matrix.module }}-${{ matrix.environment }}.txt
+              terraform state list >> state-summary-${{ matrix.module }}-${{ matrix.environment }}.txt
+              
+            else
+              echo "✅ No resources in Terraform state"
+              echo "RESOURCE_COUNT=0" >> $GITHUB_ENV
+            fi
+          else
+            echo "❌ Failed to access Terraform state"
+            echo "RESOURCE_COUNT=unknown" >> $GITHUB_ENV
+          fi
+          
+          # Check for drift
+          echo ""
+          echo "🔍 Checking for state drift..."
+          terraform plan -var-file="environments/${{ matrix.environment }}.tfvars" -input=false -detailed-exitcode >/dev/null 2>&1
+          plan_exit_code=$?
+          
+          case $plan_exit_code in
+            0)
+              echo "✅ No drift detected - state matches reality"
+              echo "DRIFT_DETECTED=false" >> $GITHUB_ENV
+              ;;
+            1)
+              echo "❌ Terraform plan failed - configuration issues"
+              echo "DRIFT_DETECTED=error" >> $GITHUB_ENV
+              ;;
+            2)
+              echo "⚠️ Drift detected - state doesn't match GCP reality"
+              echo "DRIFT_DETECTED=true" >> $GITHUB_ENV
+              
+              echo "📋 Drift details:"
+              terraform plan -var-file="environments/${{ matrix.environment }}.tfvars" -input=false -no-color 2>/dev/null | head -30 || echo "Unable to show drift details"
+              ;;
+          esac
+      
+      - name: Upload State Analysis
+        uses: actions/upload-artifact@v4
+        if: env.RESOURCE_COUNT != '0' && env.RESOURCE_COUNT != 'unknown'
+        with:
+          name: state-summary-${{ matrix.module }}-${{ matrix.environment }}
+          path: ${{ matrix.module }}/state-summary-${{ matrix.module }}-${{ matrix.environment }}.txt
+          retention-days: 7
+
+  # =============================================================================
+  # DESTRUCTION PLANNING
+  # =============================================================================
+  create-destroy-plans:
+    name: Create Destroy Plans
+    runs-on: ubuntu-latest
+    needs: [validate-inputs, terraform-state-analysis]
+    if: needs.validate-inputs.outputs.should_proceed == 'true'
+    strategy:
+      matrix:
+        environment: ${{ fromJson(needs.validate-inputs.outputs.environments) }}
+        module: ${{ fromJson(needs.validate-inputs.outputs.modules) }}
+    concurrency:
+      group: destroy-plan-${{ matrix.module }}-${{ matrix.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ env.PROJECT_ID }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+      
+      - name: Initialize Terraform
+        run: |
+          cd ${{ matrix.module }}
+          terraform init -input=false
+          
+          # Handle workspace for gke-infra
+          if [ "${{ matrix.module }}" = "gke-infra" ]; then
+            if terraform workspace select ${{ matrix.environment }} 2>/dev/null; then
+              echo "✅ Workspace selected: ${{ matrix.environment }}"
+            else
+              echo "⚠️ Workspace ${{ matrix.environment }} doesn't exist, skipping"
+              echo "SKIP_MODULE=true" >> $GITHUB_ENV
+              exit 0
+            fi
+          fi
+          
+          # Check for tfvars file
+          if [ ! -f "environments/${{ matrix.environment }}.tfvars" ]; then
+            echo "⚠️ No tfvars file found for ${{ matrix.environment }}, skipping"
+            echo "SKIP_MODULE=true" >> $GITHUB_ENV
+            exit 0
+          fi
+          
+          echo "SKIP_MODULE=false" >> $GITHUB_ENV
+      
+      - name: Handle State Drift and Import Resources
+        if: env.SKIP_MODULE == 'false' && github.event.inputs.cleanup_method != 'gcloud'
+        run: |
+          cd ${{ matrix.module }}
+          
+          echo "🔍 Checking for resources that exist in GCP but not in Terraform state..."
+          
+          if [ "${{ matrix.module }}" = "gke-infra" ]; then
+            # Dynamic cluster detection
+            echo "🔎 Discovering GKE clusters in project..."
+            clusters=$(gcloud container clusters list --project=${{ env.PROJECT_ID }} --format="value(name,location)" 2>/dev/null)
+            
+            if [ -n "$clusters" ]; then
+              echo "$clusters" | while IFS=$'\t' read -r cluster_name location; do
+                echo "✅ Found cluster: $cluster_name in $location"
+                
+                # Try to import if not in state
+                if ! terraform state show "google_container_cluster.gke_cluster_salus" >/dev/null 2>&1; then
+                  echo "🔄 Attempting to import cluster: $cluster_name"
+                  terraform import \
+                    -var-file="environments/${{ matrix.environment }}.tfvars" \
+                    "google_container_cluster.gke_cluster_salus" \
+                    "projects/${{ env.PROJECT_ID }}/locations/$location/clusters/$cluster_name" || {
+                    echo "⚠️ Import failed for $cluster_name, will handle manually"
+                  }
+                fi
+              done
+            else
+              echo "ℹ️ No GKE clusters found in GCP"
+            fi
+          fi
+          
+          if [ "${{ matrix.module }}" = "bootstrap-backend" ]; then
+            # Handle bucket imports
+            bucket_name="${{ env.PROJECT_ID }}-tfstate-${{ matrix.environment }}-cicd"
+            if gsutil ls "gs://$bucket_name" >/dev/null 2>&1; then
+              echo "✅ Found bucket: $bucket_name"
+              if ! terraform state show "google_storage_bucket.tf_state" >/dev/null 2>&1; then
+                echo "🔄 Importing bucket: $bucket_name"
+                terraform import \
+                  -var-file="environments/${{ matrix.environment }}.tfvars" \
+                  "google_storage_bucket.tf_state" \
+                  "$bucket_name" || {
+                  echo "⚠️ Bucket import failed, continuing"
+                }
+              fi
+            fi
+          fi
+      
+      - name: Create Comprehensive Destroy Plan
+        if: env.SKIP_MODULE == 'false' && github.event.inputs.cleanup_method != 'gcloud'
+        run: |
+          cd ${{ matrix.module }}
+          
+          echo "🗑️ Creating destroy plan for ${{ matrix.module }} (${{ matrix.environment }})"
+          echo "================================================================="
+          
+          # Refresh state one more time after imports
+          terraform refresh -var-file="environments/${{ matrix.environment }}.tfvars" -input=false || {
+            echo "⚠️ Refresh failed, using existing state"
+          }
+          
+          # Create destroy plan
+          terraform plan -destroy \
+            -var-file="environments/${{ matrix.environment }}.tfvars" \
+            -input=false \
+            -out=destroy-plan \
+            -detailed-exitcode || {
+              exit_code=$?
+              if [ $exit_code -eq 2 ]; then
+                echo "✅ Destroy plan created - resources will be destroyed"
+                echo "HAS_RESOURCES=true" >> $GITHUB_ENV
+              elif [ $exit_code -eq 0 ]; then
+                echo "ℹ️ No resources to destroy"
+                echo "HAS_RESOURCES=false" >> $GITHUB_ENV
+              else
+                echo "❌ Destroy plan failed"
+                echo "HAS_RESOURCES=error" >> $GITHUB_ENV
+                # Continue anyway for force cleanup
+              fi
+            }
+          
+          # Generate human-readable destroy plan
+          echo "## Terraform Destroy Plan" > destroy-plan-summary.md
+          echo "**Module**: ${{ matrix.module }}" >> destroy-plan-summary.md
+          echo "**Environment**: ${{ matrix.environment }}" >> destroy-plan-summary.md
+          echo "**Generated**: $(date)" >> destroy-plan-summary.md
+          echo "" >> destroy-plan-summary.md
+          
+          if [ -f destroy-plan ]; then
+            terraform show -no-color destroy-plan > destroy-plan.txt
+            
+            # Extract key information
+            resources_to_destroy=$(grep "will be destroyed" destroy-plan.txt | wc -l)
+            echo "**Resources to destroy**: $resources_to_destroy" >> destroy-plan-summary.md
+            echo "" >> destroy-plan-summary.md
+            
+            if [ "$resources_to_destroy" -gt 0 ]; then
+              echo "### Resources that will be DESTROYED:" >> destroy-plan-summary.md
+              echo '```' >> destroy-plan-summary.md
+              grep "will be destroyed" destroy-plan.txt >> destroy-plan-summary.md
+              echo '```' >> destroy-plan-summary.md
+              echo "" >> destroy-plan-summary.md
+              
+              echo "### Full Plan Details:" >> destroy-plan-summary.md
+              echo '```terraform' >> destroy-plan-summary.md
+              head -100 destroy-plan.txt >> destroy-plan-summary.md
+              echo '```' >> destroy-plan-summary.md
+            fi
+          else
+            echo "⚠️ No destroy plan file generated" >> destroy-plan-summary.md
+          fi
+          
+          # Display summary
+          cat destroy-plan-summary.md
+      
+      - name: Upload Destroy Plan
+        if: env.SKIP_MODULE == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: destroy-plan-${{ matrix.module }}-${{ matrix.environment }}
+          path: |
+            ${{ matrix.module }}/destroy-plan*
+          retention-days: 7
+
+  # =============================================================================
+  # RESOURCE DESTRUCTION (TERRAFORM METHOD)
+  # =============================================================================
+  terraform-destroy:
+    name: Terraform Destroy
+    runs-on: ubuntu-latest
+    needs: [validate-inputs, create-destroy-plans]
+    if: |
+      needs.validate-inputs.outputs.should_proceed == 'true' && 
+      github.event.inputs.dry_run == 'false' &&
+      (github.event.inputs.cleanup_method == 'terraform' || github.event.inputs.cleanup_method == 'both')
+    strategy:
+      # Destroy in proper dependency order
+      matrix:
+        include:
+          - environment: dev
+            module: gke-infra
+            order: 1
+          - environment: stage  
+            module: gke-infra
+            order: 1
+          - environment: prod
+            module: gke-infra
+            order: 1
+          - environment: dev
+            module: bootstrap-backend
+            order: 2
+          - environment: stage
+            module: bootstrap-backend
+            order: 2
+          - environment: prod
+            module: bootstrap-backend
+            order: 2
+    concurrency:
+      group: terraform-destroy-${{ matrix.module }}-${{ matrix.environment }}
+      cancel-in-progress: false
+    environment: 
+      name: destroy-${{ matrix.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Filter Matrix Based on Inputs
+        id: filter
+        run: |
+          should_run=false
+          
+          # Check environment filter
+          if [ "${{ github.event.inputs.environment }}" = "all" ] || [ "${{ github.event.inputs.environment }}" = "${{ matrix.environment }}" ]; then
+            # Check module filter
+            if [ "${{ github.event.inputs.module }}" = "all" ] || [ "${{ github.event.inputs.module }}" = "${{ matrix.module }}" ]; then
+              should_run=true
+            fi
+          fi
+          
+          echo "should_run=$should_run" >> $GITHUB_OUTPUT
+          
+          if [ "$should_run" = "false" ]; then
+            echo "⏭️ Skipping ${{ matrix.module }} (${{ matrix.environment }}) - not selected"
+          else
+            echo "✅ Processing ${{ matrix.module }} (${{ matrix.environment }})"
+          fi
+      
+      - name: Authenticate to Google Cloud
+        if: steps.filter.outputs.should_run == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ env.PROJECT_ID }}
+      
+      - name: Setup Terraform
+        if: steps.filter.outputs.should_run == 'true'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      
+      - name: Setup gcloud CLI
+        if: steps.filter.outputs.should_run == 'true'
+        uses: google-github-actions/setup-gcloud@v2
+      
+      - name: Download Destroy Plan
+        if: steps.filter.outputs.should_run == 'true'
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: destroy-plan-${{ matrix.module }}-${{ matrix.environment }}
+          path: ${{ matrix.module }}
+      
+      - name: Initialize Terraform
+        if: steps.filter.outputs.should_run == 'true'
+        run: |
+          cd ${{ matrix.module }}
+          terraform init -input=false
+          
+          # Handle workspace for gke-infra
+          if [ "${{ matrix.module }}" = "gke-infra" ]; then
+            if terraform workspace select ${{ matrix.environment }} 2>/dev/null; then
+              echo "✅ Workspace selected: ${{ matrix.environment }}"
+            else
+              echo "⚠️ Workspace ${{ matrix.environment }} doesn't exist"
+              terraform workspace list
+              echo "WORKSPACE_MISSING=true" >> $GITHUB_ENV
+              exit 0
+            fi
+          fi
+      
+      - name: Pre-Destruction Safety Check
+        if: steps.filter.outputs.should_run == 'true' && env.WORKSPACE_MISSING != 'true'
+        run: |
+          cd ${{ matrix.module }}
+          
+          echo "🚨 FINAL SAFETY CHECK"
+          echo "===================="
+          echo "Module: ${{ matrix.module }}"
+          echo "Environment: ${{ matrix.environment }}"
+          echo "Project: ${{ env.PROJECT_ID }}"
+          echo "Triggered by: ${{ github.actor }}"
+          echo ""
+          
+          # Show what will be destroyed
+          if [ -f destroy-plan.txt ]; then
+            echo "📋 Resources that will be DESTROYED:"
+            grep "will be destroyed" destroy-plan.txt | head -20 || echo "No specific destroy actions found"
+            echo ""
+          else
+            echo "⚠️ No destroy plan found - will attempt direct destruction"
+          fi
+          
+          # List current state
+          echo "📋 Current resources in state:"
+          terraform state list | head -20 || echo "No resources in state"
+          echo ""
+          
+          # Final countdown
+          echo "⏱️ Proceeding with destruction in 10 seconds..."
+          sleep 10
+      
+      - name: Execute Terraform Destroy
+        if: steps.filter.outputs.should_run == 'true' && env.WORKSPACE_MISSING != 'true'
+        id: terraform_destroy
+        run: |
+          cd ${{ matrix.module }}
+          
+          echo "🗑️ Executing Terraform destroy for ${{ matrix.module }} (${{ matrix.environment }})"
+          echo "============================================================================"
+          
+          # Check if we have a destroy plan
+          if [ -f destroy-plan ]; then
+            echo "✅ Using pre-generated destroy plan"
+            terraform apply -input=false -auto-approve destroy-plan
+          else
+            echo "⚠️ No destroy plan found, creating and applying destroy directly"
+            if [ -f "environments/${{ matrix.environment }}.tfvars" ]; then
+              terraform destroy \
+                -var-file="environments/${{ matrix.environment }}.tfvars" \
+                -input=false \
+                -auto-approve
+            else
+              echo "❌ No tfvars file found, cannot proceed"
+              exit 1
+            fi
+          fi
+          
+          echo "destroyed=true" >> $GITHUB_OUTPUT
+      
+      - name: Verify Terraform Destruction
+        if: steps.filter.outputs.should_run == 'true' && steps.terraform_destroy.outputs.destroyed == 'true'
+        run: |
+          cd ${{ matrix.module }}
+          
+          echo "🔍 Verifying Terraform destruction..."
+          
+          remaining_resources=$(terraform state list 2>/dev/null | wc -l)
+          if [ "$remaining_resources" -eq 0 ]; then
+            echo "✅ All resources destroyed successfully via Terraform"
+            echo "TERRAFORM_SUCCESS=true" >> $GITHUB_ENV
+          else
+            echo "⚠️ Some resources may still exist in state:"
+            terraform state list
+            echo "TERRAFORM_SUCCESS=false" >> $GITHUB_ENV
+          fi
+      
+      - name: Handle Terraform Failures
+        if: steps.filter.outputs.should_run == 'true' && (failure() || env.TERRAFORM_SUCCESS == 'false') && github.event.inputs.force_cleanup == 'true'
+        run: |
+          echo "🚨 Terraform destruction failed or incomplete"
+          echo "🔧 Force cleanup enabled - will continue with manual cleanup"
+          echo "FORCE_MANUAL_CLEANUP=true" >> $GITHUB_ENV
+
+  # =============================================================================
+  # MANUAL/GCLOUD RESOURCE DESTRUCTION
+  # =============================================================================
+  gcloud-destroy:
+    name: Manual GCloud Destroy
+    runs-on: ubuntu-latest
+    needs: [validate-inputs, terraform-destroy]
+    if: |
+      always() &&
+      needs.validate-inputs.outputs.should_proceed == 'true' && 
+      github.event.inputs.dry_run == 'false' &&
+      (github.event.inputs.cleanup_method == 'gcloud' || 
+       github.event.inputs.cleanup_method == 'both' ||
+       github.event.inputs.force_cleanup == 'true')
+    strategy:
+      matrix:
+        environment: ${{ fromJson(needs.validate-inputs.outputs.environments) }}
+    concurrency:
+      group: gcloud-destroy-${{ matrix.environment }}
+      cancel-in-progress: false
+    environment: 
+      name: manual-destroy-${{ matrix.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ env.PROJECT_ID }}
+      
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+      
+      - name: Manual Resource Cleanup
+        run: |
+          echo "🔧 Manual GCP Resource Cleanup"
+          echo "=============================="
+          echo "Environment: ${{ matrix.environment }}"
+          echo "Project: ${{ env.PROJECT_ID }}"
+          echo ""
+          
+          # Function to safely delete resources
+          safe_delete() {
+            local resource_type="$1"
+            local delete_command="$2"
+            local list_command="$3"
+            
+            echo "🔍 Checking $resource_type..."
+            
+            if eval "$list_command" >/dev/null 2>&1; then
+              resources=$(eval "$list_command" 2>/dev/null)
+              if [ -n "$resources" ] && [ "$resources" != "Listed 0 items." ]; then
+                echo "✅ Found $resource_type to delete"
+                echo "$resources"
+                echo ""
+                echo "🗑️ Deleting $resource_type..."
+                eval "$delete_command" || {
+                  echo "⚠️ Failed to delete some $resource_type, continuing..."
+                }
+                echo "✅ $resource_type cleanup completed"
+              else
+                echo "ℹ️ No $resource_type found"
+              fi
+            else
+              echo "ℹ️ Unable to check $resource_type"
+            fi
+            echo ""
+          }
+          
+          # 1. Delete GKE Clusters (highest cost)
+          echo "1️⃣ GKE CLUSTERS"
+          echo "==============="
+          
+          clusters=$(gcloud container clusters list --project=${{ env.PROJECT_ID }} --format="value(name,location)" 2>/dev/null)
+          if [ -n "$clusters" ]; then
+            echo "$clusters" | while IFS=\t' read -r cluster_name location; do
+              if [ -n "$cluster_name" ] && [ -n "$location" ]; then
+                echo "🗑️ Deleting GKE cluster: $cluster_name in $location"
+                gcloud container clusters delete "$cluster_name" \
+                  --location="$location" \
+                  --project=${{ env.PROJECT_ID }} \
+                  --quiet \
+                  --async || {
+                  echo "⚠️ Failed to delete cluster $cluster_name"
+                }
+              fi
+            done
+            
+            # Wait a bit for cluster deletion to start
+            echo "⏱️ Waiting for cluster deletions to initialize..."
+            sleep 30
+          else
+            echo "✅ No GKE clusters found"
+          fi
+          
+          # 2. Delete remaining compute instances
+          echo "2️⃣ COMPUTE INSTANCES"
+          echo "==================="
+          
+          instances=$(gcloud compute instances list --project=${{ env.PROJECT_ID }} --format="value(name,zone)" 2>/dev/null)
+          if [ -n "$instances" ]; then
+            echo "$instances" | while IFS=\t' read -r instance_name zone; do
+              if [ -n "$instance_name" ] && [ -n "$zone" ]; then
+                echo "🗑️ Deleting compute instance: $instance_name in $zone"
+                gcloud compute instances delete "$instance_name" \
+                  --zone="$zone" \
+                  --project=${{ env.PROJECT_ID }} \
+                  --quiet || {
+                  echo "⚠️ Failed to delete instance $instance_name"
+                }
+              fi
+            done
+          else
+            echo "✅ No compute instances found"
+          fi
+          
+          # 3. Delete Cloud SQL instances
+          echo "3️⃣ CLOUD SQL INSTANCES"
+          echo "======================"
+          
+          sql_instances=$(gcloud sql instances list --project=${{ env.PROJECT_ID }} --format="value(name)" 2>/dev/null)
+          if [ -n "$sql_instances" ]; then
+            echo "$sql_instances" | while read -r sql_instance; do
+              if [ -n "$sql_instance" ]; then
+                echo "🗑️ Deleting Cloud SQL instance: $sql_instance"
+                gcloud sql instances delete "$sql_instance" \
+                  --project=${{ env.PROJECT_ID }} \
+                  --quiet || {
+                  echo "⚠️ Failed to delete SQL instance $sql_instance"
+                }
+              fi
+            done
+          else
+            echo "✅ No Cloud SQL instances found"
+          fi
+          
+          # 4. Clean up networking (after compute resources)
+          echo "4️⃣ NETWORKING CLEANUP"
+          echo "====================="
+          
+          # Delete forwarding rules
+          forwarding_rules=$(gcloud compute forwarding-rules list --project=${{ env.PROJECT_ID }} --format="value(name,region)" 2>/dev/null)
+          if [ -n "$forwarding_rules" ]; then
+            echo "$forwarding_rules" | while IFS=\t' read -r rule_name region; do
+              if [ -n "$rule_name" ]; then
+                echo "🗑️ Deleting forwarding rule: $rule_name"
+                if [ -n "$region" ] && [ "$region" != "None" ]; then
+                  gcloud compute forwarding-rules delete "$rule_name" --region="$region" --project=${{ env.PROJECT_ID }} --quiet
+                else
+                  gcloud compute forwarding-rules delete "$rule_name" --global --project=${{ env.PROJECT_ID }} --quiet
+                fi
+              fi
+            done
+          fi
+          
+          # Delete custom firewall rules (keep default ones)
+          custom_fw_rules=$(gcloud compute firewall-rules list --project=${{ env.PROJECT_ID }} --format="value(name)" --filter="NOT name:(default-allow-icmp OR default-allow-internal OR default-allow-rdp OR default-allow-ssh)" 2>/dev/null)
+          if [ -n "$custom_fw_rules" ]; then
+            echo "$custom_fw_rules" | while read -r fw_rule; do
+              if [ -n "$fw_rule" ]; then
+                echo "🗑️ Deleting firewall rule: $fw_rule"
+                gcloud compute firewall-rules delete "$fw_rule" --project=${{ env.PROJECT_ID }} --quiet
+              fi
+            done
+          fi
+          
+          # 5. Storage cleanup
+          echo "5️⃣ STORAGE CLEANUP"
+          echo "=================="
+          
+          # List and optionally delete buckets
+          buckets=$(gsutil ls -p ${{ env.PROJECT_ID }} 2>/dev/null | grep -E "(tfstate|${{ matrix.environment }})" | head -10)
+          if [ -n "$buckets" ]; then
+            echo "📦 Found storage buckets:"
+            echo "$buckets"
+            
+            # Delete Terraform state buckets
+            echo "$buckets" | grep "tfstate" | while read -r bucket; do
+              if [ -n "$bucket" ]; then
+                echo "🗑️ Deleting Terraform state bucket: $bucket"
+                gsutil rm -r "$bucket" 2>/dev/null || {
+                  echo "⚠️ Failed to delete bucket $bucket"
+                }
+              fi
+            done
+          else
+            echo "✅ No relevant storage buckets found"
+          fi
+          
+          # 6. Service account cleanup
+          echo "6️⃣ SERVICE ACCOUNT CLEANUP"
+          echo "=========================="
+          
+          custom_sa=$(gcloud iam service-accounts list --project=${{ env.PROJECT_ID }} --format="value(email)" --filter="NOT email:*compute@developer.gserviceaccount.com" 2>/dev/null)
+          if [ -n "$custom_sa" ]; then
+            echo "👤 Found custom service accounts:"
+            echo "$custom_sa"
+            
+            # Only delete specific service accounts we know are safe to delete
+            echo "$custom_sa" | grep -E "(tf-|terraform-|github-actions-)" | while read -r sa_email; do
+              if [ -n "$sa_email" ]; then
+                echo "🗑️ Deleting service account: $sa_email"
+                gcloud iam service-accounts delete "$sa_email" --project=${{ env.PROJECT_ID }} --quiet || {
+                  echo "⚠️ Failed to delete service account $sa_email"
+                }
+              fi
+            done
+          else
+            echo "✅ No custom service accounts found"
+          fi
+          
+          # 7. Clean up Cloud Functions
+          echo "7️⃣ CLOUD FUNCTIONS"
+          echo "=================="
+          
+          functions=$(gcloud functions list --project=${{ env.PROJECT_ID }} --format="value(name)" 2>/dev/null)
+          if [ -n "$functions" ]; then
+            echo "$functions" | while read -r func_name; do
+              if [ -n "$func_name" ]; then
+                echo "🗑️ Deleting Cloud Function: $func_name"
+                gcloud functions delete "$func_name" --project=${{ env.PROJECT_ID }} --quiet
+              fi
+            done
+          else
+            echo "✅ No Cloud Functions found"
+          fi
+          
+          # 8. Clean up Cloud Run services
+          echo "8️⃣ CLOUD RUN SERVICES"
+          echo "===================="
+          
+          run_services=$(gcloud run services list --project=${{ env.PROJECT_ID }} --format="value(metadata.name,metadata.namespace)" 2>/dev/null)
+          if [ -n "$run_services" ]; then
+            echo "$run_services" | while IFS=\t' read -r service_name region; do
+              if [ -n "$service_name" ]; then
+                echo "🗑️ Deleting Cloud Run service: $service_name"
+                gcloud run services delete "$service_name" --region="$region" --project=${{ env.PROJECT_ID }} --quiet
+              fi
+            done
+          else
+            echo "✅ No Cloud Run services found"
+          fi
+          
+          echo ""
+          echo "✅ Manual cleanup completed for ${{ matrix.environment }}"
+
+  # =============================================================================
+  # POST-DESTRUCTION VERIFICATION & REPORTING
+  # =============================================================================
+  post-destruction-verification:
+    name: Post-Destruction Verification
+    runs-on: ubuntu-latest
+    needs: [validate-inputs, terraform-destroy, gcloud-destroy]
+    if: always() && needs.validate-inputs.outputs.should_proceed == 'true'
+    strategy:
+      matrix:
+        environment: ${{ fromJson(needs.validate-inputs.outputs.environments) }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ env.PROJECT_ID }}
+      
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+      
+      - name: Comprehensive Post-Destruction Audit
+        run: |
+          echo "# 🔍 Post-Destruction Verification Report" > verification-${{ matrix.environment }}.md
+          echo "**Environment**: ${{ matrix.environment }}" >> verification-${{ matrix.environment }}.md
+          echo "**Project**: ${{ env.PROJECT_ID }}" >> verification-${{ matrix.environment }}.md
+          echo "**Verification Time**: $(date)" >> verification-${{ matrix.environment }}.md
+          echo "**Triggered By**: ${{ github.actor }}" >> verification-${{ matrix.environment }}.md
+          echo "" >> verification-${{ matrix.environment }}.md
+          
+          # Check each resource type
+          echo "## 🔍 Resource Verification" >> verification-${{ matrix.environment }}.md
+          echo "" >> verification-${{ matrix.environment }}.md
+          
+          # Function to verify cleanup
+          verify_cleanup() {
+            local resource_type="$1"
+            local check_command="$2"
+            
+            echo "### $resource_type" >> verification-${{ matrix.environment }}.md
+            
+            if resources=$(eval "$check_command" 2>/dev/null) && [ -n "$resources" ]; then
+              echo "❌ **CLEANUP INCOMPLETE** - Resources still exist:" >> verification-${{ matrix.environment }}.md
+              echo '```' >> verification-${{ matrix.environment }}.md
+              echo "$resources" >> verification-${{ matrix.environment }}.md
+              echo '```' >> verification-${{ matrix.environment }}.md
+              
+              # Count for summary
+              count=$(echo "$resources" | wc -l)
+              echo "**Remaining**: $count resources" >> verification-${{ matrix.environment }}.md
+              
+              return 1
+            else
+              echo "✅ **SUCCESSFULLY CLEANED** - No resources found" >> verification-${{ matrix.environment }}.md
+              return 0
+            fi
+            echo "" >> verification-${{ matrix.environment }}.md
+          }
+          
+          # Verify each resource type
+          total_issues=0
+          
+          verify_cleanup "GKE Clusters" \
+            "gcloud container clusters list --project=${{ env.PROJECT_ID }} --format='table(name,location,status)'" || ((total_issues++))
+          
+          verify_cleanup "Compute Instances" \
+            "gcloud compute instances list --project=${{ env.PROJECT_ID }} --format='table(name,zone,status)'" || ((total_issues++))
+          
+          verify_cleanup "Cloud SQL Instances" \
+            "gcloud sql instances list --project=${{ env.PROJECT_ID }} --format='table(name,region,tier)'" || ((total_issues++))
+          
+          verify_cleanup "Load Balancers" \
+            "gcloud compute forwarding-rules list --project=${{ env.PROJECT_ID }} --format='table(name,region,IPAddress)'" || ((total_issues++))
+          
+          verify_cleanup "Custom Firewall Rules" \
+            "gcloud compute firewall-rules list --project=${{ env.PROJECT_ID }} --format='value(name)' --filter='NOT name:(default-allow-icmp OR default-allow-internal OR default-allow-rdp OR default-allow-ssh)'" || ((total_issues++))
+          
+          verify_cleanup "Storage Buckets (Project)" \
+            "gsutil ls -p ${{ env.PROJECT_ID }} 2>/dev/null | head -20" || ((total_issues++))
+          
+          verify_cleanup "Custom Service Accounts" \
+            "gcloud iam service-accounts list --project=${{ env.PROJECT_ID }} --format='table(email)' --filter='NOT email:*compute@developer.gserviceaccount.com'" || ((total_issues++))
+          
+          verify_cleanup "Cloud Functions" \
+            "gcloud functions list --project=${{ env.PROJECT_ID }} --format='table(name,status)'" || ((total_issues++))
+          
+          verify_cleanup "Cloud Run Services" \
+            "gcloud run services list --project=${{ env.PROJECT_ID }} --format='table(name,region)'" || ((total_issues++))
+          
+          # Generate summary
+          echo "## 📊 Cleanup Summary" >> verification-${{ matrix.environment }}.md
+          echo "" >> verification-${{ matrix.environment }}.md
+          
+          if [ "$total_issues" -eq 0 ]; then
+            echo "🎉 **CLEANUP SUCCESSFUL** - All resources have been destroyed!" >> verification-${{ matrix.environment }}.md
+            echo "✅ No remaining resources found in GCP project" >> verification-${{ matrix.environment }}.md
+            echo "💰 **Cost Impact**: All billable resources eliminated" >> verification-${{ matrix.environment }}.md
+            echo "CLEANUP_STATUS=success" >> $GITHUB_ENV
+          else
+            echo "⚠️ **CLEANUP INCOMPLETE** - $total_issues resource types still have items" >> verification-${{ matrix.environment }}.md
+            echo "🔧 **Action Required**: Manual cleanup needed for remaining resources" >> verification-${{ matrix.environment }}.md
+            echo "CLEANUP_STATUS=partial" >> $GITHUB_ENV
+          fi
+          
+          echo "" >> verification-${{ matrix.environment }}.md
+          echo "## 🔧 Manual Cleanup Commands" >> verification-${{ matrix.environment }}.md
+          echo "" >> verification-${{ matrix.environment }}.md
+          echo "If resources remain, use these commands for manual cleanup:" >> verification-${{ matrix.environment }}.md
+          echo '```bash' >> verification-${{ matrix.environment }}.md
+          echo "# Delete any remaining GKE clusters" >> verification-${{ matrix.environment }}.md
+          echo "gcloud container clusters list --project=${{ env.PROJECT_ID }}" >> verification-${{ matrix.environment }}.md
+          echo "# gcloud container clusters delete CLUSTER_NAME --region=REGION --project=${{ env.PROJECT_ID }}" >> verification-${{ matrix.environment }}.md
+          echo "" >> verification-${{ matrix.environment }}.md
+          echo "# Delete storage buckets" >> verification-${{ matrix.environment }}.md
+          echo "gsutil ls -p ${{ env.PROJECT_ID }}" >> verification-${{ matrix.environment }}.md
+          echo "# gsutil rm -r gs://BUCKET_NAME" >> verification-${{ matrix.environment }}.md
+          echo "" >> verification-${{ matrix.environment }}.md
+          echo "# List all project resources" >> verification-${{ matrix.environment }}.md
+          echo "gcloud asset search-all-resources --project=${{ env.PROJECT_ID }}" >> verification-${{ matrix.environment }}.md
+          echo '```' >> verification-${{ matrix.environment }}.md
+          
+          echo "" >> verification-${{ matrix.environment }}.md
+          echo "---" >> verification-${{ matrix.environment }}.md
+          echo "*Generated by Complete Infrastructure Destroy Pipeline*" >> verification-${{ matrix.environment }}.md
+          
+          # Display in logs
+          echo ""
+          echo "📋 VERIFICATION REPORT:"
+          echo "======================"
+          cat verification-${{ matrix.environment }}.md
+      
+      - name: Upload Verification Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-report-${{ matrix.environment }}
+          path: verification-${{ matrix.environment }}.md
+          retention-days: 90
+
+  # =============================================================================
+  # FINAL REPORTING & NOTIFICATIONS
+  # =============================================================================
+  final-report:
+    name: Generate Final Destruction Report
+    runs-on: ubuntu-latest
+    needs: [validate-inputs, pre-destruction-audit, terraform-destroy, gcloud-destroy, post-destruction-verification]
+    if: always() && needs.validate-inputs.outputs.should_proceed == 'true'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download All Reports
+        uses: actions/download-artifact@v4
+        with:
+          path: reports/
+      
+      - name: Generate Comprehensive Final Report
+        run: |
+          echo "# 🗑️ Infrastructure Destruction Final Report" > DESTRUCTION_REPORT.md
+          echo "=================================================================" >> DESTRUCTION_REPORT.md
+          echo "" >> DESTRUCTION_REPORT.md
+          echo "**Execution Summary**" >> DESTRUCTION_REPORT.md
+          echo "- **Triggered By**: ${{ github.actor }}" >> DESTRUCTION_REPORT.md
+          echo "- **Execution Time**: $(date)" >> DESTRUCTION_REPORT.md
+          echo "- **Run ID**: ${{ github.run_id }}" >> DESTRUCTION_REPORT.md
+          echo "- **Target Environment(s)**: ${{ github.event.inputs.environment }}" >> DESTRUCTION_REPORT.md
+          echo "- **Target Module(s)**: ${{ github.event.inputs.module }}" >> DESTRUCTION_REPORT.md
+          echo "- **Cleanup Method**: ${{ github.event.inputs.cleanup_method }}" >> DESTRUCTION_REPORT.md
+          echo "- **Dry Run**: ${{ github.event.inputs.dry_run }}" >> DESTRUCTION_REPORT.md
+          echo "- **Force Cleanup**: ${{ github.event.inputs.force_cleanup }}" >> DESTRUCTION_REPORT.md
+          echo "" >> DESTRUCTION_REPORT.md
+          
+          echo "## 📊 Job Status Summary" >> DESTRUCTION_REPORT.md
+          echo "" >> DESTRUCTION_REPORT.md
+          echo "| Job | Status |" >> DESTRUCTION_REPORT.md
+          echo "|-----|--------|" >> DESTRUCTION_REPORT.md
+          echo "| Pre-Audit | ${{ needs.pre-destruction-audit.result }} |" >> DESTRUCTION_REPORT.md
+          echo "| Terraform Destroy | ${{ needs.terraform-destroy.result }} |" >> DESTRUCTION_REPORT.md
+          echo "| Manual Cleanup | ${{ needs.gcloud-destroy.result }} |" >> DESTRUCTION_REPORT.md
+          echo "| Post-Verification | ${{ needs.post-destruction-verification.result }} |" >> DESTRUCTION_REPORT.md
+          echo "" >> DESTRUCTION_REPORT.md
+          
+          # Aggregate all reports
+          echo "## 📋 Detailed Reports" >> DESTRUCTION_REPORT.md
+          echo "" >> DESTRUCTION_REPORT.md
+          
+          if [ -d "reports/" ]; then
+            for report_dir in reports/*/; do
+              if [ -d "$report_dir" ]; then
+                echo "### $(basename "$report_dir")" >> DESTRUCTION_REPORT.md
+                echo "" >> DESTRUCTION_REPORT.md
+                
+                for file in "$report_dir"*.md; do
+                  if [ -f "$file" ]; then
+                    echo "#### $(basename "$file")" >> DESTRUCTION_REPORT.md
+                    echo "" >> DESTRUCTION_REPORT.md
+                    cat "$file" >> DESTRUCTION_REPORT.md
+                    echo "" >> DESTRUCTION_REPORT.md
+                    echo "---" >> DESTRUCTION_REPORT.md
+                    echo "" >> DESTRUCTION_REPORT.md
+                  fi
+                done
+              fi
+            done
+          fi
+          
+          # Add recommendations
+          echo "## 💡 Post-Destruction Recommendations" >> DESTRUCTION_REPORT.md
+          echo "" >> DESTRUCTION_REPORT.md
+          echo "1. **Verify Billing**: Check GCP billing console for cost reduction" >> DESTRUCTION_REPORT.md
+          echo "2. **Update Documentation**: Update any infrastructure documentation" >> DESTRUCTION_REPORT.md
+          echo "3. **Clean Local State**: Remove local .terraform directories" >> DESTRUCTION_REPORT.md
+          echo "4. **Archive Configs**: Archive or update Terraform configurations" >> DESTRUCTION_REPORT.md
+          echo "5. **Team Notification**: Inform team members of infrastructure changes" >> DESTRUCTION_REPORT.md
+          echo "" >> DESTRUCTION_REPORT.md
+          
+          echo "## 🔄 Recreation Instructions" >> DESTRUCTION_REPORT.md
+          echo "" >> DESTRUCTION_REPORT.md
+          echo "To recreate the infrastructure:" >> DESTRUCTION_REPORT.md
+          echo '```bash' >> DESTRUCTION_REPORT.md
+          echo "# Run the infrastructure deployment pipeline" >> DESTRUCTION_REPORT.md
+          echo "# Or manually apply Terraform:" >> DESTRUCTION_REPORT.md
+          echo "cd bootstrap-backend && terraform init && terraform apply" >> DESTRUCTION_REPORT.md
+          echo "cd ../gke-infra && terraform init && terraform apply" >> DESTRUCTION_REPORT.md
+          echo '```' >> DESTRUCTION_REPORT.md
+          echo "" >> DESTRUCTION_REPORT.md
+          
+          echo "---" >> DESTRUCTION_REPORT.md
+          echo "*Report generated by Complete Infrastructure Destroy Pipeline v1.0*" >> DESTRUCTION_REPORT.md
+          
+          # Display summary
+          echo ""
+          echo "📋 FINAL DESTRUCTION REPORT GENERATED"
+          echo "====================================="
+          wc -l DESTRUCTION_REPORT.md
+          echo ""
+          echo "First 50 lines of report:"
+          head -50 DESTRUCTION_REPORT.md
+      
+      - name: Upload Final Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: FINAL-DESTRUCTION-REPORT
+          path: DESTRUCTION_REPORT.md
+          retention-days: 365
+
+  # =============================================================================
+  # NOTIFICATIONS
+  # =============================================================================
+  notify-completion:
+    name: Send Completion Notifications
+    runs-on: ubuntu-latest
+    needs: [validate-inputs, final-report, post-destruction-verification]
+    if: always() && needs.validate-inputs.outputs.should_proceed == 'true'
+    steps:
+      - name: Determine Overall Status
+        id: status
+        run: |
+          if [ "${{ needs.post-destruction-verification.result }}" = "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "message=✅ Infrastructure destruction completed successfully" >> $GITHUB_OUTPUT
+            echo "color=good" >> $GITHUB_OUTPUT
+          elif [ "${{ needs.post-destruction-verification.result }}" = "failure" ]; then
+            echo "status=partial" >> $GITHUB_OUTPUT
+            echo "message=⚠️ Infrastructure destruction partially completed - manual cleanup required" >> $GITHUB_OUTPUT
+            echo "color=warning" >> $GITHUB_OUTPUT
+          else
+            echo "status=error" >> $GITHUB_OUTPUT
+            echo "message=❌ Infrastructure destruction failed" >> $GITHUB_OUTPUT
+            echo "color=danger" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Slack Notification
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              "text": "${{ steps.status.outputs.message }}",
+              "color": "${{ steps.status.outputs.color }}",
+              "fields": [
+                {
+                  "title": "Environment(s)",
+                  "value": "${{ github.event.inputs.environment }}",
+                  "short": true
+                },
+                {
+                  "title": "Module(s)",
+                  "value": "${{ github.event.inputs.module }}",
+                  "short": true
+                },
+                {
+                  "title": "Triggered By",
+                  "value": "${{ github.actor }}",
+                  "short": true
+                },
+                {
+                  "title": "Cleanup Method",
+                  "value": "${{ github.event.inputs.cleanup_method }}",
+                  "short": true
+                },
+                {
+                  "title": "Project",
+                  "value": "${{ secrets.GOOGLE_PROJECT_ID }}",
+                  "short": false
+                },
+                {
+                  "title": "Run Details",
+                  "value": "<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Full Report>",
+                  "short": false
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      
+      - name: Email Notification Summary
+        run: |
+          echo "📧 NOTIFICATION SUMMARY"
+          echo "======================"
+          echo "Status: ${{ steps.status.outputs.status }}"
+          echo "Message: ${{ steps.status.outputs.message }}"
+          echo "Environment(s): ${{ github.event.inputs.environment }}"
+          echo "Module(s): ${{ github.event.inputs.module }}"
+          echo "Triggered by: ${{ github.actor }}"
+          echo "Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo ""
